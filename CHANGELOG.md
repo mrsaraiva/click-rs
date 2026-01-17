@@ -33,15 +33,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ParameterSource` enum for tracking value origin (CommandLine, Environment, Default, DefaultMap, Prompt)
   - `CompletionItem` struct for shell completion support
   - 37 unit tests + 2 doc tests
+- **Phase 2: Context & Parameters** (complete)
+  - `Context` struct with thread-local stack (`push_context`, `pop_context`, `get_current_context`)
+  - `ContextBuilder` with parent inheritance for nested commands
+  - Parameter source tracking and close callbacks
+  - `Parameter` trait with `Nargs` enum (Count, Variadic, Optional)
+  - `ParameterConfig` with builder pattern and deprecation support
+  - `ClickOption` for named parameters (--flag, -f) with flag/bool/count modes
+  - `OptionBuilder` with prompt, confirmation, and hidden input support
+  - `Argument` for positional parameters with variadic support
+  - `ArgumentBuilder` with automatic required/optional detection
+  - 113 unit tests + 21 doc tests
 
 ### Dependencies
 - `thiserror` 2.0 - Error type derivation
 - `uuid` 1.0 - UUID parsing
 - `chrono` 0.4 - DateTime parsing
-
-### Planned (Phase 2)
-- `Context` struct with thread-local storage
-- `Parameter` trait with `Option` and `Argument` implementations
 
 ### Planned (Phase 3)
 - `OptionParser` for command-line argument parsing
