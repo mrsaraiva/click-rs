@@ -6,7 +6,7 @@ A comprehensive task list for porting Python Click to Rust. Reference: `/home/ms
 
 ## Current Status
 
-**Project State:** Greenfield - high-level design outlined, implementation not started. Architectural details will be refined during Phase 1-2 implementation.
+**Project State:** Phase 1 complete. Error types, parameter type system, and source tracking implemented with 37 unit tests passing.
 
 ## Milestones
 
@@ -67,53 +67,53 @@ These will be resolved during Phase 1-2 implementation. Decisions will be docume
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `ClickError` enum in `src/error.rs` | `exceptions.py` | Base error type |
-| Todo | `UsageError` variant | `exceptions.py:UsageError` | Command usage errors |
-| Todo | `BadParameter` variant | `exceptions.py:BadParameter` | Parameter validation errors |
-| Todo | `MissingParameter` variant | `exceptions.py:MissingParameter` | Required param missing |
-| Todo | `NoSuchOption` variant | `exceptions.py:NoSuchOption` | Unknown option |
-| Todo | `BadOptionUsage` variant | `exceptions.py:BadOptionUsage` | Invalid option usage |
-| Todo | `BadArgumentUsage` variant | `exceptions.py:BadArgumentUsage` | Invalid argument usage |
-| Todo | `FileError` variant | `exceptions.py:FileError` | File operation errors |
-| Todo | `Abort` variant | `exceptions.py:Abort` | User abort signal |
-| Todo | `Exit` variant with code | `exceptions.py:Exit` | Exit with code |
-| Todo | Error formatting with context | `exceptions.py:ClickException.format_message` | "Try --help" hints |
+| Done | `ClickError` enum in `src/error.rs` | `exceptions.py` | Base error type |
+| Done | `UsageError` variant | `exceptions.py:UsageError` | Command usage errors |
+| Done | `BadParameter` variant | `exceptions.py:BadParameter` | Parameter validation errors |
+| Done | `MissingParameter` variant | `exceptions.py:MissingParameter` | Required param missing |
+| Done | `NoSuchOption` variant | `exceptions.py:NoSuchOption` | Unknown option |
+| Done | `BadOptionUsage` variant | `exceptions.py:BadOptionUsage` | Invalid option usage |
+| Done | `BadArgumentUsage` variant | `exceptions.py:BadArgumentUsage` | Invalid argument usage |
+| Done | `FileError` variant | `exceptions.py:FileError` | File operation errors |
+| Done | `Abort` variant | `exceptions.py:Abort` | User abort signal |
+| Done | `Exit` variant with code | `exceptions.py:Exit` | Exit with code |
+| Done | Error formatting with context | `exceptions.py:ClickException.format_message` | "Try --help" hints |
 
 ### 1.1 Parameter Types System
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `ParamType` trait definition | `types.py:ParamType` | Base trait for all types |
-| Todo | `ParamType::convert()` method | `types.py:ParamType.convert` | String → typed value |
-| Todo | `ParamType::get_metavar()` method | `types.py:ParamType.get_metavar` | Help text display |
-| Todo | `ParamType::get_missing_message()` | `types.py:ParamType.get_missing_message` | Custom missing error |
-| Todo | `ParamType::split_envvar_value()` | `types.py:ParamType.split_envvar_value` | Split env vars |
-| Todo | `ParamType::shell_complete()` | `types.py:ParamType.shell_complete` | Tab completion |
-| Todo | `STRING` type | `types.py:STRING` | Default text type |
-| Todo | `INT` type | `types.py:INT` | Integer conversion |
-| Todo | `FLOAT` type | `types.py:FLOAT` | Float conversion |
-| Todo | `BOOL` type | `types.py:BOOL` | Boolean parsing |
-| Todo | `UUID` type | `types.py:UUID` | UUID parsing |
-| Todo | `IntRange` type with min/max | `types.py:IntRange` | Bounded integer |
-| Todo | `FloatRange` type with min/max | `types.py:FloatRange` | Bounded float |
-| Todo | `DateTime` type | `types.py:DateTime` | ISO8601 parsing |
-| Todo | `Choice` type | `types.py:Choice` | Enumerated values |
-| Todo | `Path` type with validation | `types.py:Path` | File path, exists check |
-| Todo | `File` type (lazy open) | `types.py:File` | File handle type |
-| Todo | `Tuple` composite type | `types.py:Tuple` | Multiple value types |
-| Todo | `UNPROCESSED` type | `types.py:UNPROCESSED` | Raw passthrough |
-| Todo | `convert_type()` auto-detection | `types.py:convert_type` | Python type → ParamType |
+| Done | `TypeConverter` trait definition | `types.py:ParamType` | Base trait for all types (renamed to avoid conflict) |
+| Done | `TypeConverter::convert()` method | `types.py:ParamType.convert` | String → typed value |
+| Done | `TypeConverter::get_metavar()` method | `types.py:ParamType.get_metavar` | Help text display |
+| Done | `TypeConverter::get_missing_message()` | `types.py:ParamType.get_missing_message` | Custom missing error |
+| Done | `TypeConverter::split_envvar_value()` | `types.py:ParamType.split_envvar_value` | Split env vars (uses OS path separator) |
+| Done | `TypeConverter::shell_complete()` | `types.py:ParamType.shell_complete` | Tab completion |
+| Done | `STRING` type | `types.py:STRING` | Default text type |
+| Done | `INT` type | `types.py:INT` | Integer conversion |
+| Done | `FLOAT` type | `types.py:FLOAT` | Float conversion |
+| Done | `BOOL` type | `types.py:BOOL` | Boolean parsing |
+| Done | `UUID` type | `types.py:UUID` | UUID parsing |
+| Done | `IntRange` type with min/max | `types.py:IntRange` | Bounded integer with clamp support |
+| Done | `FloatRange` type with min/max | `types.py:FloatRange` | Bounded float with clamp support |
+| Done | `DateTime` type | `types.py:DateTime` | ISO8601 parsing via chrono |
+| Done | `Choice` type | `types.py:Choice` | Enumerated values with case-insensitive option |
+| Done | `PathType` with validation | `types.py:Path` | File path, exists/readable/writable checks |
+| Done | `FileType` (lazy open) | `types.py:File` | File handle with stdin/stdout "-" support |
+| Done | `TupleType` composite type | `types.py:Tuple` | Multiple value types with convert_values() |
+| Done | `UNPROCESSED` type | `types.py:UNPROCESSED` | Raw passthrough |
+| Todo | `convert_type()` auto-detection | `types.py:convert_type` | Rust type → TypeConverter (deferred) |
 
 ### 1.2 Parameter Source Tracking
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `ParameterSource` enum | `core.py:ParameterSource` | Track value origin |
-| Todo | `CommandLine` variant | `core.py:ParameterSource.COMMANDLINE` | From CLI args |
-| Todo | `Environment` variant | `core.py:ParameterSource.ENVIRONMENT` | From env var |
-| Todo | `Default` variant | `core.py:ParameterSource.DEFAULT` | From parameter default |
-| Todo | `DefaultMap` variant | `core.py:ParameterSource.DEFAULT_MAP` | From context default_map |
-| Todo | `Prompt` variant | `core.py:ParameterSource.PROMPT` | From interactive prompt |
+| Done | `ParameterSource` enum | `core.py:ParameterSource` | Track value origin |
+| Done | `CommandLine` variant | `core.py:ParameterSource.COMMANDLINE` | From CLI args |
+| Done | `Environment` variant | `core.py:ParameterSource.ENVIRONMENT` | From env var |
+| Done | `Default` variant | `core.py:ParameterSource.DEFAULT` | From parameter default |
+| Done | `DefaultMap` variant | `core.py:ParameterSource.DEFAULT_MAP` | From context default_map |
+| Done | `Prompt` variant | `core.py:ParameterSource.PROMPT` | From interactive prompt |
 
 ### 1.3 Parity Testing
 

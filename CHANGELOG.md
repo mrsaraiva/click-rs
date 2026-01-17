@@ -18,11 +18,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Parity testing strategy
   - Platform compatibility targets (MSRV 1.70+, Linux/macOS/Windows)
   - Open design questions for Phase 1-2 resolution
+- **Phase 1: Foundation** (complete)
+  - `ClickError` enum with 10 variants mirroring Python Click's exception hierarchy
+  - `ErrorContext` for attaching command path and "Try --help" hints
+  - `TypeConverter` trait with `convert()`, `get_metavar()`, `split_envvar_value()`, `shell_complete()`
+  - Built-in types: `STRING`, `INT`, `FLOAT`, `BOOL`, `UUID`
+  - Range types: `IntRange`, `FloatRange` with min/max bounds and clamp support
+  - `DateTime` type for ISO8601 parsing via chrono
+  - `Choice` type with case-insensitive matching option
+  - `PathType` with exists/readable/writable/executable validation
+  - `FileType` with lazy opening and stdin/stdout ("-") support
+  - `TupleType` for composite multi-value parameters
+  - `UNPROCESSED` type for raw passthrough
+  - `ParameterSource` enum for tracking value origin (CommandLine, Environment, Default, DefaultMap, Prompt)
+  - `CompletionItem` struct for shell completion support
+  - 37 unit tests + 2 doc tests
 
-### Planned (Phase 1)
-- `ClickError` enum with full exception hierarchy
-- `ParamType` trait and built-in types (STRING, INT, FLOAT, BOOL, Choice, Path, etc.)
-- `ParameterSource` enum for value origin tracking
+### Dependencies
+- `thiserror` 2.0 - Error type derivation
+- `uuid` 1.0 - UUID parsing
+- `chrono` 0.4 - DateTime parsing
 
 ### Planned (Phase 2)
 - `Context` struct with thread-local storage
