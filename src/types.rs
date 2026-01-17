@@ -4,12 +4,22 @@
 //! converting and validating command-line arguments.
 
 use std::fmt;
-use std::fs::{File as StdFile, OpenOptions};
+use std::fs::{self, File as StdFile, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path as StdPath, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::{DateTime as ChronoDateTime, NaiveDate, NaiveDateTime, Utc};
 use uuid::Uuid;
+
+/// Format a float value like Python does (always show decimal point for whole numbers).
+fn format_float(value: f64) -> String {
+    if value.fract() == 0.0 && value.is_finite() {
+        format!("{:.1}", value)
+    } else {
+        format!("{}", value)
+    }
+}
 
 // =============================================================================
 // TypeConverter Trait
@@ -155,7 +165,7 @@ impl TypeConverter for IntType {
         value
             .trim()
             .parse::<i64>()
-            .map_err(|_| format!("'{}' is not a valid integer", value))
+            .map_err(|_| format!("'{}' is not a valid integer.", value))
     }
 
     fn get_metavar(&self) -> Option<String> {
@@ -185,7 +195,7 @@ impl TypeConverter for FloatType {
         value
             .trim()
             .parse::<f64>()
-            .map_err(|_| format!("'{}' is not a valid floating point value", value))
+            .map_err(|_| format!("'{}' is not a valid float.", value))
     }
 
     fn get_metavar(&self) -> Option<String> {
@@ -218,9 +228,9 @@ impl BoolType {
         }
     }
 
-    /// List of recognized boolean string values.
+    /// List of recognized boolean string values (includes empty string at start).
     pub const BOOL_STATES: &'static [&'static str] = &[
-        "0", "1", "f", "false", "n", "no", "off", "on", "t", "true", "y", "yes",
+        "", "0", "1", "f", "false", "n", "no", "off", "on", "t", "true", "y", "yes",
     ];
 }
 
@@ -440,7 +450,7 @@ impl TypeConverter for IntRange {
         let parsed: i64 = value
             .trim()
             .parse()
-            .map_err(|_| format!("'{}' is not a valid integer", value))?;
+            .map_err(|_| format!("'{}' is not a valid integer range.", value))?;
 
         // Check if value is below minimum
         let lt_min = self.min.is_some_and(|min| {
@@ -466,7 +476,7 @@ impl TypeConverter for IntRange {
 
         if lt_min || gt_max {
             return Err(format!(
-                "{} is not in the range {}",
+                "{} is not in the range {}.",
                 parsed,
                 self.describe_range()
             ));
@@ -543,13 +553,25 @@ impl FloatRange {
     }
 
     /// Make the minimum bound exclusive (value must be > min).
-    pub const fn min_open(mut self, open: bool) -> Self {
+    ///
+    /// # Panics
+    /// Panics if clamping is enabled, as clamping is not supported for open bounds.
+    pub fn min_open(mut self, open: bool) -> Self {
+        if open && self.clamp {
+            panic!("Clamping is not supported for open bounds");
+        }
         self.min_open = open;
         self
     }
 
     /// Make the maximum bound exclusive (value must be < max).
-    pub const fn max_open(mut self, open: bool) -> Self {
+    ///
+    /// # Panics
+    /// Panics if clamping is enabled, as clamping is not supported for open bounds.
+    pub fn max_open(mut self, open: bool) -> Self {
+        if open && self.clamp {
+            panic!("Clamping is not supported for open bounds");
+        }
         self.max_open = open;
         self
     }
@@ -572,16 +594,16 @@ impl FloatRange {
             (None, None) => "any float".to_string(),
             (Some(min), None) => {
                 let op = if self.min_open { ">" } else { ">=" };
-                format!("x{}{}", op, min)
+                format!("x{}{}", op, format_float(min))
             }
             (None, Some(max)) => {
                 let op = if self.max_open { "<" } else { "<=" };
-                format!("x{}{}", op, max)
+                format!("x{}{}", op, format_float(max))
             }
             (Some(min), Some(max)) => {
                 let lop = if self.min_open { "<" } else { "<=" };
                 let rop = if self.max_open { "<" } else { "<=" };
-                format!("{}{lop}x{rop}{}", min, max)
+                format!("{}{lop}x{rop}{}", format_float(min), format_float(max))
             }
         }
     }
@@ -598,7 +620,7 @@ impl TypeConverter for FloatRange {
         let parsed: f64 = value
             .trim()
             .parse()
-            .map_err(|_| format!("'{}' is not a valid floating point value", value))?;
+            .map_err(|_| format!("'{}' is not a valid float range.", value))?;
 
         // Check if value is below minimum
         let lt_min = self.min.is_some_and(|min| {
@@ -629,8 +651,8 @@ impl TypeConverter for FloatRange {
 
         if lt_min || gt_max {
             return Err(format!(
-                "{} is not in the range {}",
-                parsed,
+                "{} is not in the range {}.",
+                format_float(parsed),
                 self.describe_range()
             ));
         }
@@ -796,11 +818,14 @@ impl TypeConverter for Choice {
             }
         }
 
-        let choices_str = self.choices.join(", ");
         if self.choices.len() == 1 {
-            Err(format!("'{}' is not {}", value, choices_str))
+            Err(format!("'{}' is not '{}'.", value, self.choices[0]))
         } else {
-            Err(format!("'{}' is not one of: {}", value, choices_str))
+            let choices_str = self.choices.iter()
+                .map(|c| format!("'{}'", c))
+                .collect::<Vec<_>>()
+                .join(", ");
+            Err(format!("'{}' is not one of {}.", value, choices_str))
         }
     }
 
@@ -1115,7 +1140,14 @@ enum FileSource {
     Stdout,
 }
 
+/// Counter for generating unique temp file names.
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
 /// A wrapper around a file that supports lazy opening and stdin/stdout.
+///
+/// When `atomic` is enabled for write operations, writes go to a temporary file
+/// in the same directory. The temp file is renamed to the final path when
+/// `close()` is called or the `LazyFile` is dropped.
 #[derive(Debug)]
 pub struct LazyFile {
     path: PathBuf,
@@ -1123,6 +1155,8 @@ pub struct LazyFile {
     source: Option<FileSource>,
     is_stdio: bool,
     atomic: bool,
+    /// Path to the temporary file when using atomic writes.
+    temp_path: Option<PathBuf>,
 }
 
 impl LazyFile {
@@ -1135,6 +1169,7 @@ impl LazyFile {
             source: None,
             is_stdio,
             atomic: false,
+            temp_path: None,
         }
     }
 
@@ -1146,6 +1181,7 @@ impl LazyFile {
             source: None,
             is_stdio: true,
             atomic: false,
+            temp_path: None,
         }
     }
 
@@ -1157,6 +1193,7 @@ impl LazyFile {
             source: None,
             is_stdio: true,
             atomic: false,
+            temp_path: None,
         }
     }
 
@@ -1188,6 +1225,22 @@ impl LazyFile {
             } else {
                 FileSource::Stdout
             }
+        } else if self.atomic && self.mode == FileMode::Write {
+            // For atomic writes, create a temp file in the same directory
+            let parent = self.path.parent().unwrap_or(StdPath::new("."));
+            let counter = TEMP_COUNTER.fetch_add(1, Ordering::SeqCst);
+            let temp_name = format!(
+                ".{}.tmp.{}",
+                self.path
+                    .file_name()
+                    .map(|n| n.to_string_lossy())
+                    .unwrap_or_default(),
+                counter
+            );
+            let temp_path = parent.join(&temp_name);
+            let file = StdFile::create(&temp_path)?;
+            self.temp_path = Some(temp_path);
+            FileSource::File(file)
         } else {
             let file = match self.mode {
                 FileMode::Read => StdFile::open(&self.path),
@@ -1207,6 +1260,35 @@ impl LazyFile {
         };
         self.source = Some(source);
         Ok(())
+    }
+
+    /// Close the file and finalize atomic writes.
+    ///
+    /// For atomic writes, this renames the temp file to the final path.
+    /// Returns an error if the rename fails.
+    ///
+    /// Note: This is called automatically on drop, but errors during drop
+    /// are silently ignored. Call this explicitly if you need to handle errors.
+    pub fn close(&mut self) -> io::Result<()> {
+        // Flush and drop the file handle first
+        if let Some(FileSource::File(mut f)) = self.source.take() {
+            f.flush()?;
+            // File is dropped here, releasing the handle
+        }
+
+        // Now rename the temp file to the final path
+        if let Some(temp_path) = self.temp_path.take() {
+            fs::rename(&temp_path, &self.path)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Drop for LazyFile {
+    fn drop(&mut self) {
+        // Best-effort close on drop; errors are silently ignored
+        let _ = self.close();
     }
 }
 

@@ -6,7 +6,7 @@ A comprehensive task list for porting Python Click to Rust. Reference: `/home/ms
 
 ## Current Status
 
-**Project State:** Phase 1 complete. Error types, parameter type system, and source tracking implemented with 37 unit tests passing.
+**Project State:** Phase 1 complete. Error types, parameter type system, and source tracking implemented with 37 unit tests passing. Parity tests fully passing for both types and errors modules.
 
 ## Milestones
 
@@ -119,10 +119,11 @@ These will be resolved during Phase 1-2 implementation. Decisions will be docume
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | Python test scripts for types | `tests/parity/phase1/python/` | test_types.py |
-| Todo | Python test scripts for errors | `tests/parity/phase1/python/` | test_errors.py |
-| Todo | Rust parity binary crate | `tests/parity/phase1/rust/` | Matching output format |
-| Todo | Parity test runner script | `tests/parity/run_parity.sh` | Runs both, shows diff |
+| Done | Python test scripts for types | `tests/parity/phase1/python/` | test_types.py |
+| Done | Python test scripts for errors | `tests/parity/phase1/python/` | test_errors.py |
+| Done | Rust parity binary crate | `tests/parity/phase1/rust/` | Compiles and runs |
+| Done | Parity test runner script | `tests/parity/run_parity.sh` | Runs both, shows diff |
+| Done | Output format alignment | N/A | All library-level message differences resolved |
 
 ---
 

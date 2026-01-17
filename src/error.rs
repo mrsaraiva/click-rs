@@ -82,13 +82,17 @@ impl ErrorContext {
 
 /// Join parameter hints into a display string.
 ///
-/// All hints are quoted consistently, whether single or multiple.
+/// Single hints are unquoted; multiple hints are quoted and joined with " / ".
 fn join_param_hints(hints: &[String]) -> String {
-    hints
-        .iter()
-        .map(|h| format!("'{}'", h))
-        .collect::<Vec<_>>()
-        .join(" / ")
+    if hints.len() == 1 {
+        hints[0].clone()
+    } else {
+        hints
+            .iter()
+            .map(|h| format!("'{}'", h))
+            .collect::<Vec<_>>()
+            .join(" / ")
+    }
 }
 
 /// The main error type for click-rs.
@@ -228,10 +232,11 @@ fn format_missing_param_message(
         ParamType::Parameter => "Missing parameter",
     };
 
+    // Single hint/name is unquoted; multiple hints are quoted
     let hint_str = if let Some(hints) = param_hint {
         format!(" {}", join_param_hints(hints))
     } else if let Some(name) = param_name {
-        format!(" '{}'", name)
+        format!(" {}", name)
     } else {
         String::new()
     };
@@ -251,13 +256,12 @@ fn format_no_such_option(option_name: &str, possibilities: Option<&[String]>) ->
 
     match possibilities {
         Some(opts) if opts.len() == 1 => {
-            format!("{} Did you mean '{}'?", base, opts[0])
+            // Single suggestion: unquoted
+            format!("{} Did you mean {}?", base, opts[0])
         }
         Some(opts) if !opts.is_empty() => {
-            // Preserve order from suggestion algorithm (e.g., ranked by similarity)
-            // Quote each option consistently with single-option case
-            let quoted: Vec<_> = opts.iter().map(|o| format!("'{}'", o)).collect();
-            format!("{} (Possible options: {})", base, quoted.join(", "))
+            // Multiple suggestions: unquoted, comma-separated
+            format!("{} (Possible options: {})", base, opts.join(", "))
         }
         _ => base,
     }
@@ -295,10 +299,11 @@ impl ClickError {
                 param_hint,
                 ..
             } => {
+                // Single hint/name is unquoted; multiple hints are quoted
                 let hint_str = if let Some(hints) = param_hint {
                     Some(join_param_hints(hints))
                 } else {
-                    param_name.as_ref().map(|n| format!("'{}'", n))
+                    param_name.clone()
                 };
 
                 match hint_str {
@@ -332,8 +337,13 @@ impl ClickError {
             }
         }
 
-        // Add the error message
-        parts.push(format!("Error: {}", self.format_message()));
+        // Add the error message (no trailing space if message is empty)
+        let msg = self.format_message();
+        if msg.is_empty() {
+            parts.push("Error:".to_string());
+        } else {
+            parts.push(format!("Error: {}", msg));
+        }
 
         parts.join("\n")
     }
@@ -517,9 +527,14 @@ impl ClickError {
 
     /// Create a new file error.
     pub fn file_error(filename: impl Into<PathBuf>, hint: impl Into<String>) -> Self {
+        let hint_str = hint.into();
         ClickError::FileError {
             filename: filename.into(),
-            hint: hint.into(),
+            hint: if hint_str.is_empty() {
+                "unknown error".to_string()
+            } else {
+                hint_str
+            },
         }
     }
 
@@ -564,10 +579,11 @@ mod tests {
 
     #[test]
     fn test_bad_parameter_format() {
+        // Single param hint is unquoted
         let err = ClickError::bad_parameter_named("must be positive", "--count");
         assert_eq!(
             err.format_message(),
-            "Invalid value for '--count': must be positive"
+            "Invalid value for --count: must be positive"
         );
 
         let err = ClickError::bad_parameter("must be positive");
@@ -576,11 +592,12 @@ mod tests {
 
     #[test]
     fn test_missing_parameter_display() {
+        // Single param is unquoted
         let err = ClickError::missing_option("--name");
-        assert_eq!(err.to_string(), "Missing option '--name'.");
+        assert_eq!(err.to_string(), "Missing option --name.");
 
         let err = ClickError::missing_argument("FILE");
-        assert_eq!(err.to_string(), "Missing argument 'FILE'.");
+        assert_eq!(err.to_string(), "Missing argument FILE.");
     }
 
     #[test]
@@ -588,17 +605,18 @@ mod tests {
         let err = ClickError::no_such_option("--hlep");
         assert_eq!(err.to_string(), "No such option: --hlep");
 
+        // Single suggestion: unquoted
         let err = ClickError::no_such_option_with_suggestions("--hlep", vec!["--help".to_string()]);
-        assert_eq!(err.to_string(), "No such option: --hlep Did you mean '--help'?");
+        assert_eq!(err.to_string(), "No such option: --hlep Did you mean --help?");
 
-        // Order is preserved from suggestion algorithm (not sorted), each option quoted
+        // Multiple suggestions: unquoted, comma-separated
         let err = ClickError::no_such_option_with_suggestions(
             "--hlep",
             vec!["--help".to_string(), "--hello".to_string()],
         );
         assert_eq!(
             err.to_string(),
-            "No such option: --hlep (Possible options: '--help', '--hello')"
+            "No such option: --hlep (Possible options: --help, --hello)"
         );
     }
 
@@ -647,7 +665,7 @@ mod tests {
 
         assert!(output.contains("Usage: myapp [OPTIONS] FILE"));
         assert!(output.contains("Try 'myapp --help' for help."));
-        assert!(output.contains("Error: Missing argument 'FILE'."));
+        assert!(output.contains("Error: Missing argument FILE."));
     }
 
     #[test]
