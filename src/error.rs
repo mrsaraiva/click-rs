@@ -426,9 +426,10 @@ impl ClickError {
                 message,
                 ctx: boxed,
             },
-            ClickError::BadArgumentUsage { message, .. } => {
-                ClickError::BadArgumentUsage { message, ctx: boxed }
-            }
+            ClickError::BadArgumentUsage { message, .. } => ClickError::BadArgumentUsage {
+                message,
+                ctx: boxed,
+            },
             // These errors don't have context
             other => other,
         }
@@ -565,7 +566,10 @@ mod tests {
         assert_eq!(ClickError::no_such_option("--bar").exit_code(), 2);
         assert_eq!(ClickError::bad_option_usage("--x", "msg").exit_code(), 2);
         assert_eq!(ClickError::bad_argument_usage("msg").exit_code(), 2);
-        assert_eq!(ClickError::file_error("test.txt", "not found").exit_code(), 1);
+        assert_eq!(
+            ClickError::file_error("test.txt", "not found").exit_code(),
+            1
+        );
         assert_eq!(ClickError::abort().exit_code(), 1);
         assert_eq!(ClickError::exit(0).exit_code(), 0);
         assert_eq!(ClickError::exit(42).exit_code(), 42);
@@ -607,7 +611,10 @@ mod tests {
 
         // Single suggestion: unquoted
         let err = ClickError::no_such_option_with_suggestions("--hlep", vec!["--help".to_string()]);
-        assert_eq!(err.to_string(), "No such option: --hlep Did you mean --help?");
+        assert_eq!(
+            err.to_string(),
+            "No such option: --hlep Did you mean --help?"
+        );
 
         // Multiple suggestions: unquoted, comma-separated
         let err = ClickError::no_such_option_with_suggestions(
@@ -650,7 +657,10 @@ mod tests {
             .with_command_path("myapp")
             .with_help_options(vec!["--help".to_string(), "-h".to_string()]);
 
-        assert_eq!(ctx.help_hint(), Some("Try 'myapp --help' for help.".to_string()));
+        assert_eq!(
+            ctx.help_hint(),
+            Some("Try 'myapp --help' for help.".to_string())
+        );
     }
 
     #[test]

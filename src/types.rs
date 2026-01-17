@@ -821,7 +821,9 @@ impl TypeConverter for Choice {
         if self.choices.len() == 1 {
             Err(format!("'{}' is not '{}'.", value, self.choices[0]))
         } else {
-            let choices_str = self.choices.iter()
+            let choices_str = self
+                .choices
+                .iter()
                 .map(|c| format!("'{}'", c))
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -997,13 +999,7 @@ impl TypeConverter for PathType {
                         .map(|cwd| cwd.join(value))
                         .unwrap_or_else(|_| PathBuf::from(value))
                 }
-                Err(_) => {
-                    return Err(format!(
-                        "{} '{}' does not exist",
-                        self.type_name(),
-                        value
-                    ))
-                }
+                Err(_) => return Err(format!("{} '{}' does not exist", self.type_name(), value)),
             }
         } else {
             PathBuf::from(value)
@@ -1011,11 +1007,7 @@ impl TypeConverter for PathType {
 
         // Check existence
         if self.exists && !path.exists() {
-            return Err(format!(
-                "{} '{}' does not exist",
-                self.type_name(),
-                value
-            ));
+            return Err(format!("{} '{}' does not exist", self.type_name(), value));
         }
 
         // Only perform these checks if the path exists
@@ -1028,11 +1020,7 @@ impl TypeConverter for PathType {
                 return Err(format!("{} '{}' is a file", self.type_name(), value));
             }
             if !self.dir_okay && metadata.is_dir() {
-                return Err(format!(
-                    "{} '{}' is a directory",
-                    self.type_name(),
-                    value
-                ));
+                return Err(format!("{} '{}' is a directory", self.type_name(), value));
             }
 
             // Check permissions (Unix-specific checks, simplified for cross-platform)
@@ -1043,18 +1031,10 @@ impl TypeConverter for PathType {
                 let mode = perms.mode();
 
                 if self.readable && (mode & 0o444) == 0 {
-                    return Err(format!(
-                        "{} '{}' is not readable",
-                        self.type_name(),
-                        value
-                    ));
+                    return Err(format!("{} '{}' is not readable", self.type_name(), value));
                 }
                 if self.writable && (mode & 0o222) == 0 {
-                    return Err(format!(
-                        "{} '{}' is not writable",
-                        self.type_name(),
-                        value
-                    ));
+                    return Err(format!("{} '{}' is not writable", self.type_name(), value));
                 }
                 if self.executable && (mode & 0o111) == 0 {
                     return Err(format!(
@@ -1125,7 +1105,10 @@ impl FileMode {
 
     /// Returns true if this mode is for writing.
     pub fn is_write(&self) -> bool {
-        matches!(self, FileMode::Write | FileMode::Append | FileMode::ReadWrite)
+        matches!(
+            self,
+            FileMode::Write | FileMode::Append | FileMode::ReadWrite
+        )
     }
 }
 
@@ -1558,7 +1541,11 @@ impl TupleType {
     /// should call this once for each argument consumed.
     pub fn convert_element(&self, index: usize, value: &str) -> Result<TupleValue, String> {
         let element_type = self.types.get(index).ok_or_else(|| {
-            format!("tuple index {} out of bounds (arity {})", index, self.types.len())
+            format!(
+                "tuple index {} out of bounds (arity {})",
+                index,
+                self.types.len()
+            )
         })?;
 
         match element_type {
