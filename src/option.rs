@@ -125,6 +125,7 @@ fn derive_param_name(long: &[String], short: &[String]) -> String {
 /// - Prompts for interactive input
 ///
 /// Note: Named `ClickOption` to avoid shadowing `std::option::Option`.
+#[derive(Clone)]
 pub struct ClickOption {
     /// Base parameter configuration.
     pub config: ParameterConfig,

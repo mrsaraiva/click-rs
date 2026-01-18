@@ -44,15 +44,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `Argument` for positional parameters with variadic support
   - `ArgumentBuilder` with automatic required/optional detection
   - 113 unit tests + 21 doc tests
+- **Phase 3: Parser, Command & Group** (complete)
+  - `OptionParser` for command-line argument parsing with Click-compatible behavior
+  - Support for short (`-v`), long (`--verbose`), grouped (`-abc`), and equals (`--opt=val`) option syntax
+  - `--` terminator for end-of-options handling
+  - Levenshtein distance-based option suggestions for typos
+  - `Command` struct with callback execution, help generation, and `main()` entry point
+  - `CommandBuilder` for fluent command construction
+  - `Group` struct for subcommand dispatch with `CommandLike` trait
+  - Chain mode for executing multiple subcommands in sequence
+  - Eager option processing (`--help` works before validating required params)
+  - Optional positional argument handling with lookahead for required args
+  - `FlagNeedsValue` support for optional option values
+  - 229 unit tests + 36 doc tests
+
+### Known Limitations (v1.0)
+- Mixed flag/value append ordering (`--opt --opt val`) may not preserve order
+- Repeated flag-as-optional (`--opt --opt`) collapses to single value in append mode
 
 ### Dependencies
 - `thiserror` 2.0 - Error type derivation
 - `uuid` 1.0 - UUID parsing
 - `chrono` 0.4 - DateTime parsing
-
-### Planned (Phase 3)
-- `OptionParser` for command-line argument parsing
-- `Command` and `Group` structs
 
 ### Planned (Phase 4)
 - `click-derive` proc-macro crate

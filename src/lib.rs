@@ -4,18 +4,24 @@
 //! support for commands, options, arguments, and help generation.
 
 pub mod argument;
+pub mod command;
 pub mod context;
 pub mod error;
+pub mod group;
 pub mod option;
 pub mod parameter;
+pub mod parser;
 mod source;
 pub mod types;
 
 pub use argument::{Argument, ArgumentBuilder};
+pub use command::{Command, CommandBuilder, CommandCallback};
 pub use context::{get_current_context, pop_context, push_context, Context, ContextBuilder};
+pub use group::{CommandLike, Group, GroupBuilder, ResultCallback};
 pub use error::{ClickError, ErrorContext, ParamType, Result};
 pub use option::{parse_option_name, split_option_names, ClickOption, OptionBuilder};
 pub use parameter::{DeprecationInfo, Nargs, Parameter, ParameterConfig};
+pub use parser::{split_opt, OptionAction, OptionParser, ParseResult, ParsedValue};
 pub use source::ParameterSource;
 
 // Re-export type converter trait and common types
