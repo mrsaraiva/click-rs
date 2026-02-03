@@ -82,7 +82,7 @@ pub mod testing;
 pub mod types;
 pub mod utils;
 
-pub use argument::{Argument, ArgumentBuilder};
+pub use argument::{AnyTypeConverter, Argument, ArgumentBuilder, ShellCompleteCallback};
 pub use command::{Command, CommandBuilder, CommandCallback};
 pub use context::{get_current_context, pop_context, push_context, Context, ContextBuilder};
 pub use decorators::{make_pass_decorator, PassDecorator};
@@ -137,9 +137,9 @@ pub use types::{
 
 // Re-export terminal UI functions
 pub use termui::{
-    clear, confirm, echo, edit_text, get_terminal_size, getchar, isatty, pause, progressbar,
-    prompt, secho, stderr_isatty, stdin_isatty, stdout_isatty, strip_ansi_codes, style, Color,
-    ProgressBar,
+    clear, confirm, echo, echo_via_pager, edit_text, get_terminal_size, getchar, isatty, launch,
+    pause, progressbar, prompt, secho, stderr_isatty, stdin_isatty, stdout_isatty,
+    strip_ansi_codes, style, Color, ProgressBar,
 };
 
 // Re-export shell completion

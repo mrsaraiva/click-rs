@@ -708,7 +708,11 @@ impl Command {
         false
     }
 
-    fn get_version_output_from_args(&self, args: &[String]) -> Option<String> {
+    /// Check if a version option was triggered and return the version output.
+    ///
+    /// This is used internally by `main()` and `Group::main()` to handle
+    /// version options that trigger `Exit { code: 0 }`.
+    pub fn get_version_output_from_args(&self, args: &[String]) -> Option<String> {
         for opt in &self.options {
             let meta = opt.config.metavar.as_deref()?;
             let output = meta.strip_prefix(Self::VERSION_METAVAR_PREFIX)?;

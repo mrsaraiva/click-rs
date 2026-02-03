@@ -533,7 +533,51 @@ pub fn get_completions(
         }
     }
 
+    // Complete arguments (if not completing an option)
+    if !incomplete.starts_with('-') {
+        if let Some(command) = cmd.as_any().downcast_ref::<Command>() {
+            completions.extend(get_argument_completions(command, &ctx, args, incomplete));
+        } else if let Some(group) = cmd.as_any().downcast_ref::<Group>() {
+            completions.extend(get_argument_completions(&group.command, &ctx, args, incomplete));
+        } else if let Some(collection) = cmd.as_any().downcast_ref::<CommandCollection>() {
+            completions.extend(get_argument_completions(&collection.base.command, &ctx, args, incomplete));
+        }
+    }
+
     completions
+}
+
+/// Get argument completions for a command.
+///
+/// Determines which argument is being completed based on the number of
+/// positional arguments already provided, then calls the argument's
+/// `get_completions` method.
+fn get_argument_completions(
+    cmd: &Command,
+    ctx: &crate::context::Context,
+    args: &[String],
+    incomplete: &str,
+) -> Vec<CompletionItem> {
+    // Count how many positional arguments have been consumed
+    // (arguments that don't start with '-' and aren't option values)
+    let positional_count = args
+        .iter()
+        .filter(|a| !a.starts_with('-'))
+        .count();
+
+    // Find the argument at that position
+    if let Some(arg) = cmd.arguments.get(positional_count) {
+        return arg.get_completions(ctx, incomplete);
+    }
+
+    // If we have variadic arguments, the last argument can complete more values
+    if let Some(last_arg) = cmd.arguments.last() {
+        if last_arg.multiple() {
+            return last_arg.get_completions(ctx, incomplete);
+        }
+    }
+
+    Vec::new()
 }
 
 /// Get option completions for a command.
@@ -872,5 +916,117 @@ mod tests {
 
         // Function name should have underscore, not dash
         assert!(source.contains("_my_app_completion"));
+    }
+
+    // =========================================================================
+    // Tests for argument completions
+    // =========================================================================
+
+    #[test]
+    fn test_get_completions_argument_with_choice_type() {
+        use crate::argument::Argument;
+        use crate::types::Choice;
+
+        let cmd = Command::new("test")
+            .argument(
+                Argument::new("format")
+                    .type_(Choice::new(["json", "xml", "yaml"]))
+                    .build()
+            )
+            .build();
+
+        let completions = get_completions(&cmd, "test", &[], "j");
+
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].value, "json");
+    }
+
+    #[test]
+    fn test_get_completions_argument_with_custom_callback() {
+        use crate::argument::Argument;
+
+        let cmd = Command::new("test")
+            .argument(
+                Argument::new("filename")
+                    .shell_complete(|_ctx, incomplete| {
+                        vec![
+                            CompletionItem::new(format!("{}.txt", incomplete)),
+                            CompletionItem::new(format!("{}.md", incomplete)),
+                        ]
+                    })
+                    .build()
+            )
+            .build();
+
+        let completions = get_completions(&cmd, "test", &[], "file");
+
+        assert_eq!(completions.len(), 2);
+        assert!(completions.iter().any(|c| c.value == "file.txt"));
+        assert!(completions.iter().any(|c| c.value == "file.md"));
+    }
+
+    #[test]
+    fn test_get_completions_second_argument() {
+        use crate::argument::Argument;
+        use crate::types::Choice;
+
+        let cmd = Command::new("test")
+            .argument(Argument::new("first").build())
+            .argument(
+                Argument::new("second")
+                    .type_(Choice::new(["a", "b", "c"]))
+                    .build()
+            )
+            .build();
+
+        // First argument has no completions (STRING type)
+        let completions = get_completions(&cmd, "test", &[], "x");
+        assert!(completions.is_empty());
+
+        // Second argument should complete after first is provided
+        let completions = get_completions(&cmd, "test", &["value1".to_string()], "a");
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].value, "a");
+    }
+
+    #[test]
+    fn test_get_completions_variadic_argument() {
+        use crate::argument::Argument;
+        use crate::types::Choice;
+
+        let cmd = Command::new("test")
+            .argument(
+                Argument::new("files")
+                    .multiple()
+                    .type_(Choice::new(["foo.txt", "bar.txt", "baz.txt"]))
+                    .build()
+            )
+            .build();
+
+        // First value
+        let completions = get_completions(&cmd, "test", &[], "f");
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].value, "foo.txt");
+
+        // Second value (variadic continues to complete)
+        let completions = get_completions(&cmd, "test", &["foo.txt".to_string()], "b");
+        assert_eq!(completions.len(), 2);
+        assert!(completions.iter().any(|c| c.value == "bar.txt"));
+        assert!(completions.iter().any(|c| c.value == "baz.txt"));
+    }
+
+    #[test]
+    fn test_get_completions_no_more_arguments() {
+        use crate::argument::Argument;
+
+        let cmd = Command::new("test")
+            .argument(Argument::new("single").build())
+            .build();
+
+        // After the single argument is provided, no more completions
+        let completions = get_completions(&cmd, "test", &["value".to_string()], "x");
+        // Should be empty (no more arguments to complete)
+        // Note: options might still complete if incomplete doesn't start with '-'
+        assert!(completions.is_empty());
     }
 }

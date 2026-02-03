@@ -811,22 +811,49 @@ impl CommandLike for Group {
                 .unwrap_or_else(|| "program".to_string())
         });
 
-        let ctx = self.make_context(&prog_name, args, None)?;
-        let ctx = Arc::new(ctx);
+        let args_for_eager = args.clone();
 
-        // Push context onto thread-local stack
-        push_context(Arc::clone(&ctx));
+        // Try to make context - this may fail early for --help or --version
+        let ctx_result = self.make_context(&prog_name, args, None);
 
-        // Invoke the group
-        let result = self.invoke(&ctx);
+        match ctx_result {
+            Ok(ctx) => {
+                let ctx = Arc::new(ctx);
 
-        // Pop context
-        pop_context();
+                // Push context onto thread-local stack
+                push_context(Arc::clone(&ctx));
 
-        // Run close callbacks
-        ctx.close();
+                // Invoke the group
+                let result = self.invoke(&ctx);
 
-        result
+                // Pop context
+                pop_context();
+
+                // Run close callbacks
+                ctx.close();
+
+                result
+            }
+            Err(ClickError::Exit { code: 0 }) => {
+                // Help or version (or other eager exits) was requested.
+                //
+                // Version is implemented as an eager option that signals Exit(0) and stores the
+                // output string in the option metavar with a reserved prefix.
+                if let Some(version_output) =
+                    self.command.get_version_output_from_args(&args_for_eager)
+                {
+                    println!("{}", version_output);
+                    return Ok(());
+                }
+
+                // Default: print help.
+                // Create a minimal context for help formatting.
+                let ctx = ContextBuilder::new().info_name(&prog_name).build();
+                println!("{}", self.get_help(&ctx));
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
     }
 
     fn get_help(&self, ctx: &Context) -> String {
@@ -1205,14 +1232,39 @@ impl CommandLike for CommandCollection {
                 .unwrap_or_else(|| "program".to_string())
         });
 
-        let ctx = self.make_context(&prog_name, args, None)?;
-        let ctx = Arc::new(ctx);
+        let args_for_eager = args.clone();
 
-        push_context(Arc::clone(&ctx));
-        let result = self.invoke(&ctx);
-        pop_context();
-        ctx.close();
-        result
+        // Try to make context - this may fail early for --help or --version
+        let ctx_result = self.make_context(&prog_name, args, None);
+
+        match ctx_result {
+            Ok(ctx) => {
+                let ctx = Arc::new(ctx);
+
+                push_context(Arc::clone(&ctx));
+                let result = self.invoke(&ctx);
+                pop_context();
+                ctx.close();
+                result
+            }
+            Err(ClickError::Exit { code: 0 }) => {
+                // Help or version (or other eager exits) was requested.
+                if let Some(version_output) = self
+                    .base
+                    .command
+                    .get_version_output_from_args(&args_for_eager)
+                {
+                    println!("{}", version_output);
+                    return Ok(());
+                }
+
+                // Default: print help.
+                let ctx = ContextBuilder::new().info_name(&prog_name).build();
+                println!("{}", self.get_help(&ctx));
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
     }
 
     fn get_help(&self, ctx: &Context) -> String {
@@ -2421,5 +2473,70 @@ mod tests {
             collection.get_command("dup").unwrap().get_short_help(),
             "Base"
         );
+    }
+
+    // =========================================================================
+    // Tests for eager option handling in Groups (--help, --version)
+    // =========================================================================
+
+    #[test]
+    fn test_group_help_with_missing_subcommand() {
+        // --help should work even when subcommand is missing and required
+        let group = Group::new("cli")
+            .subcommand_required(true)
+            .command(Command::new("sub").build())
+            .build();
+
+        // Without --help, missing subcommand should fail
+        let ctx = group.make_context("cli", vec![], None);
+        // Note: Group doesn't fail in make_context for missing subcommand,
+        // it fails in invoke(). So this test verifies --help triggers early.
+
+        // With --help, should exit cleanly (Exit code 0)
+        let ctx = group.make_context("cli", vec!["--help".to_string()], None);
+        assert!(matches!(ctx, Err(ClickError::Exit { code: 0 })));
+    }
+
+    #[test]
+    fn test_group_help_with_required_option() {
+        // --help should work even when a required option is missing
+        let group = Group::new("cli")
+            .option(
+                ClickOption::new(&["--name", "-n"])
+                    .required()
+                    .build(),
+            )
+            .command(Command::new("sub").build())
+            .build();
+
+        // Without --help, missing required option should fail
+        let ctx = group.make_context("cli", vec!["sub".to_string()], None);
+        assert!(ctx.is_err());
+
+        // With --help, should exit cleanly (Exit code 0)
+        let ctx = group.make_context("cli", vec!["--help".to_string()], None);
+        assert!(matches!(ctx, Err(ClickError::Exit { code: 0 })));
+    }
+
+    #[test]
+    fn test_group_version_option() {
+        use crate::option::ClickOption;
+
+        // Create a version option that uses the special metavar prefix
+        let version_opt = ClickOption::new(&["--version", "-V"])
+            .flag("true")
+            .eager()
+            .metavar("__click_version__:myapp 1.0.0")
+            .help("Show version and exit.")
+            .build();
+
+        let group = Group::new("cli")
+            .option(version_opt)
+            .command(Command::new("sub").build())
+            .build();
+
+        // --version should trigger Exit(0)
+        let ctx = group.make_context("cli", vec!["--version".to_string()], None);
+        assert!(matches!(ctx, Err(ClickError::Exit { code: 0 })));
     }
 }

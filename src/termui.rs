@@ -1319,6 +1319,11 @@ fn read_hidden_input(prompt: &str) -> Result<String> {
 /// }
 ///
 /// bar.finish();
+///
+/// // Custom fill/empty characters
+/// let mut bar = ProgressBar::new(100, None, true, true, false, 30)
+///     .fill_char('█')
+///     .empty_char('░');
 /// ```
 pub struct ProgressBar {
     /// Total length of the progress (number of items)
@@ -1344,6 +1349,10 @@ pub struct ProgressBar {
     /// Last rendered output length (for TTY updates)
     #[allow(dead_code)]
     last_output_len: usize,
+    /// Character used for filled portion of bar (default: '#')
+    fill_char: char,
+    /// Character used for empty portion of bar (default: '-')
+    empty_char: char,
 }
 
 impl ProgressBar {
@@ -1377,11 +1386,43 @@ impl ProgressBar {
             finished: false,
             is_tty: stdout_isatty(),
             last_output_len: 0,
+            fill_char: '#',
+            empty_char: '-',
         };
 
         // Initial render
         bar.render_internal();
         bar
+    }
+
+    /// Set the character used for the filled portion of the bar.
+    ///
+    /// Default is '#'.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let bar = ProgressBar::new(100, None, true, true, false, 30)
+    ///     .fill_char('█');
+    /// ```
+    pub fn fill_char(mut self, c: char) -> Self {
+        self.fill_char = c;
+        self
+    }
+
+    /// Set the character used for the empty portion of the bar.
+    ///
+    /// Default is '-'.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let bar = ProgressBar::new(100, None, true, true, false, 30)
+    ///     .empty_char('░');
+    /// ```
+    pub fn empty_char(mut self, c: char) -> Self {
+        self.empty_char = c;
+        self
     }
 
     /// Update the progress bar by advancing by `n` items.
@@ -1447,7 +1488,11 @@ impl ProgressBar {
         // Progress bar
         let filled = (progress * self.width as f64) as usize;
         let empty = self.width.saturating_sub(filled);
-        let bar = format!("[{}{}]", "#".repeat(filled), "-".repeat(empty));
+        let bar = format!(
+            "[{}{}]",
+            self.fill_char.to_string().repeat(filled),
+            self.empty_char.to_string().repeat(empty)
+        );
         parts.push(bar);
 
         // Percentage
@@ -1806,6 +1851,27 @@ mod tests {
         let bar = ProgressBar::new(0, None, false, true, false, 10);
         let output = bar.render();
         assert!(output.contains("0%"));
+    }
+
+    #[test]
+    fn test_progress_bar_custom_chars() {
+        let mut bar = ProgressBar::new(100, None, false, false, false, 10)
+            .fill_char('=')
+            .empty_char(' ');
+        bar.set_position(50);
+        let output = bar.render();
+        // Should have 5 '=' chars and 5 ' ' chars (50% of width 10)
+        assert!(output.contains("[=====     ]"));
+    }
+
+    #[test]
+    fn test_progress_bar_unicode_chars() {
+        let bar = ProgressBar::new(100, None, false, false, false, 4)
+            .fill_char('\u{2588}')  // Full block
+            .empty_char('\u{2591}'); // Light shade
+        let output = bar.render();
+        // At 0%, should be all empty chars
+        assert!(output.contains("[\u{2591}\u{2591}\u{2591}\u{2591}]"));
     }
 
     #[test]
