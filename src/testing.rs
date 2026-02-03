@@ -400,8 +400,6 @@ pub struct CliRunner {
     /// `InvokeResult { exit_code: 1, exception_message: Some(...) }`.
     catch_panics: bool,
 
-    /// Character encoding for output (default: UTF-8).
-    charset: String,
 }
 
 impl CliRunner {
@@ -421,7 +419,6 @@ impl CliRunner {
             echo_stdin: false,
             mix_stderr: true,
             catch_panics: true,
-            charset: "utf-8".to_string(),
         }
     }
 

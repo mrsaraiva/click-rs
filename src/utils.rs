@@ -124,10 +124,10 @@ pub fn format_filename(path: &Path) -> String {
 /// let app_dir = get_app_dir("myapp", false);
 /// println!("App directory: {}", app_dir.display());
 /// ```
-pub fn get_app_dir(app_name: &str, roaming: bool) -> PathBuf {
+pub fn get_app_dir(app_name: &str, _roaming: bool) -> PathBuf {
     #[cfg(target_os = "windows")]
     {
-        let base = if roaming {
+        let base = if _roaming {
             env::var("APPDATA").ok()
         } else {
             env::var("LOCALAPPDATA").ok()
@@ -152,7 +152,7 @@ pub fn get_app_dir(app_name: &str, roaming: bool) -> PathBuf {
 
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        if roaming {
+        if _roaming {
             // Use XDG data dir
             if let Ok(xdg_data) = env::var("XDG_DATA_HOME") {
                 return PathBuf::from(xdg_data).join(app_name);
