@@ -12,7 +12,7 @@ use click::{
     clear, echo, edit_text, getchar, pause, style, Argument, Color, Command, ClickOption,
     Group, ProgressBar, CommandLike,
 };
-use click::termui::launch;
+use click::launch;
 
 fn main() {
     let cli = Group::new("termui")
@@ -134,12 +134,12 @@ fn progress_cmd() -> Command {
                 (nanos % 1000) as f64 / 1000.0
             }
 
-            // Progress bar 1: Processing accounts
+            // Progress bar 1: Processing accounts with custom characters
             {
-                // Note: Python Click supports custom fill_char in progressbar, but click-rs
-                // ProgressBar uses fixed '#' and '-' characters. This is a simplification.
                 echo(&format!("Processing {} accounts...", count), true, false, None);
-                let mut bar = ProgressBar::new(count, Some("Processing accounts"), true, true, true, 30);
+                let mut bar = ProgressBar::new(count, Some("Processing accounts"), true, true, true, 30)
+                    .fill_char('█')
+                    .empty_char('░');
                 for _ in 0..count {
                     process_slowly();
                     bar.update(1);
@@ -166,10 +166,12 @@ fn progress_cmd() -> Command {
                 bar.finish();
             }
 
-            // Progress bar 3: Counting with custom template
+            // Progress bar 3: Counting with custom characters
             {
-                echo(&format!("\nCounting {} items with cyan fill...", count), true, false, None);
-                let mut bar = ProgressBar::new(count, Some("Counting"), true, true, true, 30);
+                echo(&format!("\nCounting {} items with custom characters...", count), true, false, None);
+                let mut bar = ProgressBar::new(count, Some("Counting"), true, true, true, 30)
+                    .fill_char('=')
+                    .empty_char(' ');
                 for _ in 0..count {
                     process_slowly();
                     bar.update(1);

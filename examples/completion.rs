@@ -7,17 +7,14 @@
 //! Features demonstrated:
 //! - Group with subcommands
 //! - Nested groups
-//! - Custom shell completion for arguments (simulated via help text)
+//! - Custom shell completion for arguments using `shell_complete` callbacks
 //! - Path type for directory arguments
-//!
-//! Note: Custom shell_complete callbacks are not yet implemented in click-rs.
-//! This example shows the command structure; completion relies on built-in behavior.
 
 use std::env;
 use std::fs;
 
 use click::{
-    Argument, ClickError, ClickOption, Command, Context, Group, PathType, Result,
+    Argument, ClickError, ClickOption, Command, CompletionItem, Context, Group, PathType, Result,
     completion::make_completion_option,
     group::CommandLike,
 };
@@ -71,7 +68,15 @@ fn build_show_env_command() -> Command {
         .help("A command to print environment variables")
         .argument(
             Argument::new("envvar")
-                .help("Environment variable name (completion shows available vars)")
+                .help("Environment variable name")
+                .shell_complete(|_ctx, incomplete| {
+                    // Return environment variable names matching the incomplete prefix
+                    env::vars()
+                        .filter(|(key, _)| key.to_lowercase().starts_with(&incomplete.to_lowercase()))
+                        .take(10)
+                        .map(|(key, _)| CompletionItem::new(key))
+                        .collect()
+                })
                 .build(),
         )
         .callback(show_env_callback)
@@ -106,13 +111,28 @@ fn build_group() -> Group {
 
 /// Build the `select-user` command inside the nested group.
 fn build_select_user_command() -> Command {
-    // In Python Click, this uses a custom shell_complete function.
-    // click-rs doesn't yet support custom completers, so we document the users in help.
+    // User database for shell completion
+    let users = [
+        ("bob", "butcher"),
+        ("alice", "baker"),
+        ("jerry", "candlestick maker"),
+    ];
+
     Command::new("select-user")
-        .help("Choose a user (bob=butcher, alice=baker, jerry=candlestick maker)")
+        .help("Choose a user")
         .argument(
             Argument::new("user")
                 .help("User to select")
+                .shell_complete(move |_ctx, incomplete| {
+                    // Return users matching the incomplete prefix with their occupation as help
+                    users
+                        .iter()
+                        .filter(|(name, _)| name.starts_with(incomplete))
+                        .map(|(name, occupation)| {
+                            CompletionItem::new(name.to_string()).with_help(occupation.to_string())
+                        })
+                        .collect()
+                })
                 .build(),
         )
         .callback(select_user_callback)

@@ -299,19 +299,9 @@ fn main() {
                 .help("Show the version and exit.")
                 .flag("true")
                 .eager()
+                .metavar("__click_version__:repo, version 1.0")
                 .build(),
         )
-        .callback(|ctx| {
-            // Check for version flag first
-            if ctx.get_param::<String>("version").map(|s| s == "true").unwrap_or(false) {
-                echo("repo, version 1.0", true, false, None);
-                return Err(ClickError::exit(0));
-            }
-
-            // Note: The actual repo object setup happens in run_with_repo
-            // This callback is mainly for group-level logic
-            Ok(())
-        })
         .command(clone_cmd)
         .command(delete_cmd)
         .command(setuser_cmd)
@@ -321,12 +311,6 @@ fn main() {
 
     // Get CLI args
     let args: Vec<String> = env::args().skip(1).collect();
-
-    // Handle --version early (before full parsing)
-    if args.iter().any(|a| a == "--version") {
-        echo("repo, version 1.0", true, false, None);
-        return;
-    }
 
     // Pre-process to extract repo settings for the Repo object
     let mut repo_home = env::var("REPO_HOME").unwrap_or_else(|_| ".repo".to_string());

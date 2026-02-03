@@ -121,6 +121,7 @@ fn build_command() -> Command {
                 .flag("true")
                 .eager()
                 .help("Show the version and exit.")
+                .metavar("__click_version__:validation, version 1.0")
                 .build(),
         )
         .callback(cli_callback)
@@ -129,14 +130,6 @@ fn build_command() -> Command {
 
 /// The callback that performs validation and prints results.
 fn cli_callback(ctx: &Context) -> Result<()> {
-    // Check for version flag
-    if let Some(version) = ctx.get_param::<String>("version") {
-        if version == "true" {
-            echo("validation, version 1.0", true, false, None);
-            return Ok(());
-        }
-    }
-
     // Get and validate count
     let count_str = ctx
         .get_param::<String>("count")
