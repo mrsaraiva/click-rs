@@ -465,7 +465,7 @@ behavior/API gaps beyond the Phase 1–6 parity suite coverage.
 | Done | Define capture semantics | `InvokeResult.output` mirrors Click: `stdout + stderr` when mixed; stderr always captured separately |
 | Done | Refactor capture into per-platform backend | Internal `run_with_capture` with Unix + Windows implementations |
 | Done | Windows backend | Redirect `STD_*` handles via Win32 `SetStdHandle` and capture pipes |
-| In Progress | macOS/Linux verification | Linux verified locally; macOS verified via CI |
+| In Progress | macOS/Linux verification | Linux verified locally; macOS/Windows runtime verified via CI |
 | Done | Panic-safety | Stdio/env restored even if invocation panics |
 
 ### 7.2 CI Matrix (Linux/macOS/Windows)
