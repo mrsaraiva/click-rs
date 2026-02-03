@@ -141,7 +141,15 @@ pub fn derive_command(input: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro_derive(
     Group,
-    attributes(group, option, argument, subcommand, pass_context, pass_obj)
+    attributes(
+        group,
+        option,
+        argument,
+        subcommand,
+        pass_context,
+        pass_obj,
+        help_option
+    )
 )]
 pub fn derive_group(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

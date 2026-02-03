@@ -186,6 +186,8 @@ impl Default for Command {
 }
 
 impl Command {
+    const VERSION_METAVAR_PREFIX: &'static str = "__click_version__:";
+
     /// Create a new command builder with the given name.
     ///
     /// # Example
@@ -372,6 +374,16 @@ impl Command {
                             opt.name().to_string(),
                             Arc::new(val.clone()) as Arc<dyn std::any::Any + Send + Sync>,
                         );
+
+                        // Special-case version option: eager print + exit, before validation.
+                        if opt
+                            .config
+                            .metavar
+                            .as_deref()
+                            .is_some_and(|m| m.starts_with(Self::VERSION_METAVAR_PREFIX))
+                        {
+                            return Err(ClickError::Exit { code: 0 });
+                        }
                     }
                 }
             }
@@ -635,6 +647,8 @@ impl Command {
                 .unwrap_or_else(|| "program".to_string())
         });
 
+        let args_for_eager = args.clone();
+
         // Try to make context - this may fail early for --help
         let ctx_result = self.make_context(&prog_name, args, None);
 
@@ -659,14 +673,52 @@ impl Command {
                 result
             }
             Err(ClickError::Exit { code: 0 }) => {
-                // Help was requested or no_args_is_help triggered
-                // Create a minimal context for help formatting
+                // Help (or other eager exits) was requested.
+                //
+                // Version is implemented as an eager option that signals Exit(0) and stores the
+                // output string in the option metavar with a reserved prefix.
+                if let Some(version_output) = self.get_version_output_from_args(&args_for_eager) {
+                    println!("{}", version_output);
+                    return Ok(());
+                }
+
+                // Default: print help.
+                // Create a minimal context for help formatting.
                 let ctx = ContextBuilder::new().info_name(&prog_name).build();
                 println!("{}", self.get_help(&ctx));
                 Ok(())
             }
             Err(e) => Err(e),
         }
+    }
+
+    fn arg_matches_opt(arg: &str, opt: &str) -> bool {
+        if arg == opt {
+            return true;
+        }
+        if opt.starts_with("--") && arg.starts_with(opt) && arg.get(opt.len()..opt.len() + 1) == Some("=") {
+            return true;
+        }
+        if opt.starts_with('-') && opt.len() == 2 && !opt.starts_with("--") {
+            let needle = opt.chars().nth(1).unwrap_or('\0');
+            if arg.starts_with('-') && !arg.starts_with("--") {
+                return arg.chars().skip(1).any(|c| c == needle);
+            }
+        }
+        false
+    }
+
+    fn get_version_output_from_args(&self, args: &[String]) -> Option<String> {
+        for opt in &self.options {
+            let meta = opt.config.metavar.as_deref()?;
+            let output = meta.strip_prefix(Self::VERSION_METAVAR_PREFIX)?;
+
+            let mut names = opt.long.iter().chain(opt.short.iter());
+            if names.any(|n| args.iter().any(|a| Self::arg_matches_opt(a, n))) {
+                return Some(output.to_string());
+            }
+        }
+        None
     }
 
     /// Format the usage line.
@@ -840,6 +892,7 @@ pub struct CommandBuilder {
     short_help: Option<String>,
     options_metavar: String,
     add_help_option: bool,
+    help_option: Option<ClickOption>,
     no_args_is_help: bool,
     hidden: bool,
     deprecated: Option<String>,
@@ -861,6 +914,7 @@ impl CommandBuilder {
             short_help: None,
             options_metavar: "[OPTIONS]".to_string(),
             add_help_option: true,
+            help_option: None,
             no_args_is_help: false,
             hidden: false,
             deprecated: None,
@@ -924,6 +978,18 @@ impl CommandBuilder {
         self
     }
 
+    /// Override the automatically generated help option.
+    ///
+    /// This lets you customize the help option names (e.g. `-h`, `--help`) and
+    /// its help text while keeping it eager.
+    ///
+    /// Setting a custom help option implicitly enables `add_help_option`.
+    pub fn help_option(mut self, opt: ClickOption) -> Self {
+        self.add_help_option = true;
+        self.help_option = Some(opt);
+        self
+    }
+
     /// Set whether to show help if no args provided (default: false).
     pub fn no_args_is_help(mut self, value: bool) -> Self {
         self.no_args_is_help = value;
@@ -981,7 +1047,7 @@ impl CommandBuilder {
             allow_extra_args: self.allow_extra_args,
             allow_interspersed_args: self.allow_interspersed_args,
             ignore_unknown_options: self.ignore_unknown_options,
-            help_option: None,
+            help_option: self.help_option,
         }
     }
 }

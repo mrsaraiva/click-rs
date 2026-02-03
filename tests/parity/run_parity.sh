@@ -122,6 +122,7 @@ get_modules() {
         phase1) echo "types errors" ;;
         phase2) echo "context parameter" ;;
         phase3) echo "parser command group" ;;
+        phase4) echo "decorators formatting" ;;
         *) echo "" ;;
     esac
 }

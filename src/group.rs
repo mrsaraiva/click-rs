@@ -777,6 +777,7 @@ pub struct GroupBuilder {
     subcommand_required: Option<bool>,
     subcommand_metavar: Option<String>,
     add_help_option: bool,
+    help_option: Option<ClickOption>,
     no_args_is_help: Option<bool>,
 }
 
@@ -800,6 +801,7 @@ impl GroupBuilder {
             subcommand_required: None,
             subcommand_metavar: None,
             add_help_option: true,
+            help_option: None,
             no_args_is_help: None,
         }
     }
@@ -865,6 +867,15 @@ impl GroupBuilder {
     /// Set whether to add a --help option (default: true).
     pub fn add_help_option(mut self, add: bool) -> Self {
         self.add_help_option = add;
+        self
+    }
+
+    /// Override the automatically generated help option.
+    ///
+    /// Setting a custom help option implicitly enables `add_help_option`.
+    pub fn help_option(mut self, opt: ClickOption) -> Self {
+        self.add_help_option = true;
+        self.help_option = Some(opt);
         self
     }
 
@@ -979,6 +990,10 @@ impl GroupBuilder {
             .allow_interspersed_args(false)
             .add_help_option(self.add_help_option)
             .no_args_is_help(no_args_is_help);
+
+        if let Some(help_opt) = self.help_option {
+            cmd_builder = cmd_builder.help_option(help_opt);
+        }
 
         // Add options
         for opt in self.options {

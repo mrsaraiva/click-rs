@@ -3,9 +3,41 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{
-    Attribute, Expr, ExprLit, Lit, LitBool, LitChar, LitStr, Meta, MetaNameValue, Result, Token,
-    Type,
+    Attribute, Expr, ExprArray, ExprLit, ExprTuple, Lit, LitBool, LitChar, LitStr, Meta,
+    MetaNameValue, Result, Token, Type,
 };
+
+fn parse_names_expr(expr: Expr) -> Result<Vec<String>> {
+    fn parse_items(items: impl IntoIterator<Item = Expr>) -> Result<Vec<String>> {
+        let mut out = Vec::new();
+        for item in items {
+            match item {
+                Expr::Lit(ExprLit {
+                    lit: Lit::Str(s), ..
+                }) => out.push(s.value()),
+                other => {
+                    return Err(syn::Error::new_spanned(
+                        other,
+                        "names must be string literals (e.g. names = [\"--help\", \"-h\"])",
+                    ));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    match expr {
+        Expr::Array(ExprArray { elems, .. }) => parse_items(elems.into_iter().collect::<Vec<_>>()),
+        Expr::Tuple(ExprTuple { elems, .. }) => parse_items(elems.into_iter().collect::<Vec<_>>()),
+        Expr::Lit(ExprLit {
+            lit: Lit::Str(s), ..
+        }) => Ok(vec![s.value()]),
+        other => Err(syn::Error::new_spanned(
+            other,
+            "names must be a string literal or an array/tuple of string literals",
+        )),
+    }
+}
 
 // =============================================================================
 // Version Option Attributes
@@ -62,6 +94,11 @@ impl VersionOptionAttr {
                             let lit: LitStr = meta.input.parse()?;
                             result.message = Some(lit.value());
                         }
+                        Some("names") => {
+                            let _: Token![=] = meta.input.parse()?;
+                            let expr: Expr = meta.input.parse()?;
+                            result.names = Some(parse_names_expr(expr)?);
+                        }
                         _ => {
                             return Err(meta.error(format!(
                                 "unknown version_option attribute: {:?}",
@@ -113,6 +150,11 @@ impl HelpOptionAttr {
                             let _: Token![=] = meta.input.parse()?;
                             let lit: LitStr = meta.input.parse()?;
                             result.help = Some(lit.value());
+                        }
+                        Some("names") => {
+                            let _: Token![=] = meta.input.parse()?;
+                            let expr: Expr = meta.input.parse()?;
+                            result.names = Some(parse_names_expr(expr)?);
                         }
                         _ => {
                             return Err(meta.error(format!(
@@ -166,6 +208,11 @@ impl ConfirmationOptionAttr {
                             let _: Token![=] = meta.input.parse()?;
                             let lit: LitStr = meta.input.parse()?;
                             result.help = Some(lit.value());
+                        }
+                        Some("names") => {
+                            let _: Token![=] = meta.input.parse()?;
+                            let expr: Expr = meta.input.parse()?;
+                            result.names = Some(parse_names_expr(expr)?);
                         }
                         _ => {
                             return Err(meta.error(format!(
@@ -231,6 +278,11 @@ impl PasswordOptionAttr {
                             let _: Token![=] = meta.input.parse()?;
                             let lit: LitStr = meta.input.parse()?;
                             result.help = Some(lit.value());
+                        }
+                        Some("names") => {
+                            let _: Token![=] = meta.input.parse()?;
+                            let expr: Expr = meta.input.parse()?;
+                            result.names = Some(parse_names_expr(expr)?);
                         }
                         _ => {
                             return Err(meta.error(format!(

@@ -6,7 +6,7 @@ use syn::{Data, DeriveInput, Error, Fields, Ident, Result, Type};
 
 use crate::attrs::{
     extract_doc_comment, extract_inner_type, is_bool_type, is_option_type, is_vec_type,
-    to_kebab_case, ArgumentAttr, FieldAttr, GroupAttr, OptionAttr,
+    to_kebab_case, ArgumentAttr, FieldAttr, GroupAttr, HelpOptionAttr, OptionAttr,
 };
 
 /// Parsed field information
@@ -23,6 +23,7 @@ pub fn expand_group(input: DeriveInput) -> Result<TokenStream> {
 
     // Parse container attributes
     let group_attr = GroupAttr::from_attrs(&input.attrs)?;
+    let help_option_attr = HelpOptionAttr::from_attrs(&input.attrs)?;
 
     // Get doc comment for help
     let doc_comment = extract_doc_comment(&input.attrs);
@@ -79,6 +80,29 @@ pub fn expand_group(input: DeriveInput) -> Result<TokenStream> {
         .or(doc_comment)
         .unwrap_or_default();
 
+    let help_option_override = match help_option_attr {
+        Some(h) => {
+            let mut names = h.names.clone().unwrap_or_else(|| vec!["--help".to_string()]);
+            if !names.iter().any(|n| n == "--help") {
+                names.push("--help".to_string());
+            }
+            let help = h
+                .help
+                .clone()
+                .unwrap_or_else(|| "Show this message and exit.".to_string());
+            quote! {
+                .help_option(
+                    click::ClickOption::new(&[#(#names),*])
+                        .help(#help)
+                        .flag("true")
+                        .eager()
+                        .build()
+                )
+            }
+        }
+        None => quote! {},
+    };
+
     // Generate option builders
     let option_builders = generate_option_builders(&field_infos)?;
 
@@ -134,6 +158,7 @@ pub fn expand_group(input: DeriveInput) -> Result<TokenStream> {
                     #short_help_opt
                     #(#option_builders)*
                     #(#argument_builders)*
+                    #help_option_override
                     .build()
             }
 
@@ -153,6 +178,7 @@ pub fn expand_group(input: DeriveInput) -> Result<TokenStream> {
                     #short_help_opt
                     #(#option_builders)*
                     #(#argument_builders)*
+                    #help_option_override
                     .callback(move |ctx| {
                         let instance = #name::from_context(ctx)?;
                         run_fn(instance, ctx)

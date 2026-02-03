@@ -21,7 +21,7 @@ struct FieldInfo {
 /// Container-level convenience options parsed from attributes
 struct ConvenienceOptions {
     version_option: Option<VersionOptionAttr>,
-    _help_option: Option<HelpOptionAttr>,
+    help_option: Option<HelpOptionAttr>,
     confirmation_option: Option<ConfirmationOptionAttr>,
     password_option: Option<PasswordOptionAttr>,
 }
@@ -36,7 +36,7 @@ pub fn expand_command(input: DeriveInput) -> Result<TokenStream> {
     // Parse convenience option attributes
     let convenience_opts = ConvenienceOptions {
         version_option: VersionOptionAttr::from_attrs(&input.attrs)?,
-        _help_option: HelpOptionAttr::from_attrs(&input.attrs)?,
+        help_option: HelpOptionAttr::from_attrs(&input.attrs)?,
         confirmation_option: ConfirmationOptionAttr::from_attrs(&input.attrs)?,
         password_option: PasswordOptionAttr::from_attrs(&input.attrs)?,
     };
@@ -211,36 +211,91 @@ pub fn expand_command(input: DeriveInput) -> Result<TokenStream> {
 /// Generate convenience option builders (version, confirmation, password)
 fn generate_convenience_option_builders(
     opts: &ConvenienceOptions,
-    _cmd_name: &str,
+    cmd_name: &str,
 ) -> Vec<TokenStream> {
     let mut builders = Vec::new();
 
-    // Version option: --version / -V
-    if let Some(ref ver_attr) = opts.version_option {
-        let help = ver_attr.help.clone().unwrap_or_else(|| "Show the version and exit.".to_string());
+    // Help option override.
+    if let Some(ref help_attr) = opts.help_option {
+        let mut names = help_attr
+            .names
+            .clone()
+            .unwrap_or_else(|| vec!["--help".to_string()]);
+        if !names.iter().any(|n| n == "--help") {
+            names.push("--help".to_string());
+        }
+        let help = help_attr
+            .help
+            .clone()
+            .unwrap_or_else(|| "Show this message and exit.".to_string());
 
-        // We use a special eager callback that prints version and exits
-        // For now, we create a bool_flag option that the user must check
         builders.push(quote! {
-            .option(
-                click::ClickOption::new(&["--version", "-V"])
+            .help_option(
+                click::ClickOption::new(&[#(#names),*])
                     .help(#help)
-                    .bool_flag()
+                    .flag("true")
                     .eager()
                     .build()
             )
         });
     }
 
+    // Version option: --version / -V
+    if let Some(ref ver_attr) = opts.version_option {
+        let names = ver_attr
+            .names
+            .clone()
+            .unwrap_or_else(|| vec!["--version".to_string(), "-V".to_string()]);
+        let help = ver_attr
+            .help
+            .clone()
+            .unwrap_or_else(|| "Show the version and exit.".to_string());
+        let prog_name = ver_attr.prog_name.clone().unwrap_or_else(|| cmd_name.to_string());
+        let message = ver_attr
+            .message
+            .clone()
+            .unwrap_or_else(|| "%(prog)s, version %(version)s".to_string());
+
+        let version_expr = match ver_attr.version.as_ref() {
+            Some(v) => quote! { #v },
+            None => quote! { env!("CARGO_PKG_VERSION") },
+        };
+
+        builders.push(quote! {
+            .option({
+                let __click_version: &str = #version_expr;
+                let __click_prog: &str = #prog_name;
+                let __click_template: &str = #message;
+                let __click_out = __click_template
+                    .replace("%(prog)s", __click_prog)
+                    .replace("%(version)s", __click_version);
+                let __click_meta = format!("{}{}", "__click_version__:", __click_out);
+                click::ClickOption::new(&[#(#names),*])
+                    .help(#help)
+                    .flag("true")
+                    .eager()
+                    .metavar(&__click_meta)
+                    .build()
+            })
+        });
+    }
+
     // Confirmation option: --yes / -y
     if let Some(ref conf_attr) = opts.confirmation_option {
-        let help = conf_attr.help.clone().unwrap_or_else(|| "Confirm the action without prompting.".to_string());
+        let names = conf_attr
+            .names
+            .clone()
+            .unwrap_or_else(|| vec!["--yes".to_string(), "-y".to_string()]);
+        let help = conf_attr
+            .help
+            .clone()
+            .unwrap_or_else(|| "Confirm the action without prompting.".to_string());
 
         builders.push(quote! {
             .option(
-                click::ClickOption::new(&["--yes", "-y"])
+                click::ClickOption::new(&[#(#names),*])
                     .help(#help)
-                    .bool_flag()
+                    .flag("true")
                     .build()
             )
         });
@@ -248,13 +303,17 @@ fn generate_convenience_option_builders(
 
     // Password option: --password with hidden input
     if let Some(ref pass_attr) = opts.password_option {
+        let names = pass_attr
+            .names
+            .clone()
+            .unwrap_or_else(|| vec!["--password".to_string()]);
         let prompt = pass_attr.prompt.clone().unwrap_or_else(|| "Password".to_string());
         let help = pass_attr.help.clone().unwrap_or_default();
         let confirmation = pass_attr.confirmation_prompt;
 
         builders.push(quote! {
             .option(
-                click::ClickOption::new(&["--password"])
+                click::ClickOption::new(&[#(#names),*])
                     .help(#help)
                     .prompt(#prompt)
                     .hide_input(true)

@@ -8,9 +8,9 @@ A comprehensive task list for porting Python Click to Rust. Reference: `/home/ms
 
 **Last Updated:** 2026-02-03
 
-**Project State:** Phases 1–3 complete (Milestone M2 achieved). Parity suites for phases 1–3 pass via `tests/parity/run_parity.sh`.
+**Project State:** Phases 1–4 complete (Milestone M3 achieved). Parity suites for phases 1–4 pass via `tests/parity/run_parity.sh`.
 
-**Next Milestone:** M3: Derive Macros (finish decorator-style convenience attributes + Phase 4 parity).
+**Next Milestone:** M4: Full Port parity (Phase 5–6 parity + remaining ergonomic helpers).
 
 **Notes:** Some roadmap items are implemented with slightly different Rust APIs than the Python references. See individual phase tables for remaining gaps.
 
@@ -293,8 +293,8 @@ These will be resolved during Phase 1-2 implementation. Decisions will be docume
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `#[version_option]` | `decorators.py:version_option` | Pre-configured --version (printing/exit behavior pending) |
-| Todo | `#[help_option]` | `decorators.py:help_option` | Pre-configured --help |
+| Done | `#[version_option]` | `decorators.py:version_option` | Pre-configured --version |
+| Done | `#[help_option]` | `decorators.py:help_option` | Pre-configured --help |
 | Done | `#[confirmation_option]` | `decorators.py:confirmation_option` | --yes confirmation |
 | Done | `#[password_option]` | `decorators.py:password_option` | Password with confirm |
 | Done | `#[pass_context]` | `decorators.py:pass_context` | Inject context |
@@ -322,9 +322,9 @@ These will be resolved during Phase 1-2 implementation. Decisions will be docume
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | Python test scripts for Decorators | `tests/parity/phase4/python/` | test_decorators.py |
-| Todo | Python test scripts for Formatting | `tests/parity/phase4/python/` | test_formatting.py |
-| Todo | Rust parity binary crate | `tests/parity/phase4/rust/` | Matching output format |
+| Done | Python test scripts for Decorators | `tests/parity/phase4/python/` | test_decorators.py |
+| Done | Python test scripts for Formatting | `tests/parity/phase4/python/` | test_formatting.py |
+| Done | Rust parity binary crate | `tests/parity/phase4/rust/` | Matching output format |
 
 ---
 
