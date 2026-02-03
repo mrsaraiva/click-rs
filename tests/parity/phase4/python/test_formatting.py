@@ -14,15 +14,9 @@ def _maybe_add_click_src(path: str) -> bool:
         return True
     return False
 
-
 click_src = os.environ.get("CLICK_SRC")
-if not (click_src and _maybe_add_click_src(click_src)):
-    for path in [
-        os.path.expanduser("~/dev/mark/Proj/Libs/click/src"),
-        "/home/msaraiva/dev/mark/Proj/Libs/click/src",
-    ]:
-        if _maybe_add_click_src(path):
-            break
+if click_src and not _maybe_add_click_src(click_src):
+    raise RuntimeError(f"CLICK_SRC is set but not readable: {click_src!r}")
 
 from click.formatting import wrap_text
 
@@ -47,4 +41,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

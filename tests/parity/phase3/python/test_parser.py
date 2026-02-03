@@ -6,11 +6,8 @@ Compares Python Click output with Rust click output.
 import sys
 import os
 
-# Insert Click library path before imports.
-# Use CLICK_SRC environment variable, or fall back to common locations.
-#
-# Some environments have these directories present but unreadable; only prepend
-# the path if the Click package can actually be read from it.
+# Optional: use a local Click source tree by setting CLICK_SRC to its `src/` dir.
+# Parity runs default to the pinned `click` wheel installed by `tests/parity/run_parity.sh`.
 def _maybe_add_click_src(path: str) -> bool:
     init_py = os.path.join(path, "click", "__init__.py")
     if os.path.isfile(init_py) and os.access(init_py, os.R_OK):
@@ -18,15 +15,9 @@ def _maybe_add_click_src(path: str) -> bool:
         return True
     return False
 
-
 click_src = os.environ.get("CLICK_SRC")
-if not (click_src and _maybe_add_click_src(click_src)):
-    for path in [
-        os.path.expanduser("~/dev/mark/Proj/Libs/click/src"),
-        "/home/msaraiva/dev/mark/Proj/Libs/click/src",
-    ]:
-        if _maybe_add_click_src(path):
-            break
+if click_src and not _maybe_add_click_src(click_src):
+    raise RuntimeError(f"CLICK_SRC is set but not readable: {click_src!r}")
 
 import click
 from click.testing import CliRunner

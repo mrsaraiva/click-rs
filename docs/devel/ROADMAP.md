@@ -48,6 +48,8 @@ tests/parity/
 
 **Reference:** See `/home/msaraiva/dev/mark/Proj/Libs/rich-rs/tests/parity/` for the parity testing model. Key pattern: Python and Rust programs print identical formatted output, compared via `diff`.
 
+**Python Click version pin:** Parity tests are pinned to **Click 8.3.1** via `tests/parity/requirements.txt`, and `tests/parity/run_parity.sh` runs them inside a dedicated venv at `tests/parity/.venv`.
+
 ## Platform & Compatibility
 
 | Aspect | Target |
@@ -55,7 +57,7 @@ tests/parity/
 | **MSRV** | Rust 1.70+ (edition 2021) |
 | **Platforms** | Linux, macOS, Windows 10+ |
 | **Terminal** | Any terminal supporting ANSI escape codes; fallback for Windows legacy console |
-| **Click version** | Behavioral parity with Click 8.1.x |
+| **Click version** | Behavioral parity with Click 8.3.1 (pinned for parity tests) |
 
 ## Open Design Questions
 
@@ -480,7 +482,7 @@ behavior/API gaps beyond the Phase 1–6 parity suite coverage.
 
 | Status | Task | Notes |
 |--------|------|-------|
-| Todo | Create “gap inventory” doc | Track intentional vs unintentional divergences from Click |
+| Done | Create “gap inventory” doc | `docs/devel/GAP_INVENTORY.md` |
 | Todo | Expand parity suites incrementally | Add deterministic tests for parsing/completion edge cases |
 | Todo | `make_pass_decorator(ensure=...)` decision | Requires `Context` interior mutability or an alternative API |
 | Todo | Public API stabilization | Audit re-exports + builder surface for 1.0 |

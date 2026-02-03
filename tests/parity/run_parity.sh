@@ -7,6 +7,37 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PHASE="${1:-phase1}"
 MODULE="${2:-all}"
+PINNED_CLICK_VERSION="8.3.1"
+
+# Use a dedicated venv so parity stays pinned to the Click version we ported against.
+PARITY_PYTHON="${PARITY_PYTHON:-python3}"
+VENV_DIR="${SCRIPT_DIR}/.venv"
+PARITY_ALLOW_CLICK_SRC="${PARITY_ALLOW_CLICK_SRC:-0}"
+
+ensure_venv() {
+    if [ ! -x "${VENV_DIR}/bin/python" ]; then
+        echo -e "${CYAN}Creating parity venv...${NC}"
+        "${PARITY_PYTHON}" -m venv "${VENV_DIR}"
+    fi
+
+    # shellcheck disable=SC1090
+    PYTHON="${VENV_DIR}/bin/python"
+
+    local installed_click
+    installed_click="$("${PYTHON}" -c 'import importlib.metadata as m; print(m.version("click"))' 2>/dev/null || true)"
+
+    if [ "${installed_click}" != "${PINNED_CLICK_VERSION}" ]; then
+        echo -e "${CYAN}Installing pinned Click ${PINNED_CLICK_VERSION} into parity venv...${NC}"
+        "${PYTHON}" -m pip -q install --upgrade pip >/dev/null
+        "${PYTHON}" -m pip -q install -r "${SCRIPT_DIR}/requirements.txt"
+    fi
+
+    installed_click="$("${PYTHON}" -c 'import importlib.metadata as m; print(m.version("click"))')"
+    if [ "${installed_click}" != "${PINNED_CLICK_VERSION}" ]; then
+        echo -e "${RED}Error: parity venv Click version mismatch (have ${installed_click}, want ${PINNED_CLICK_VERSION})${NC}"
+        exit 1
+    fi
+}
 
 # Colors for output
 RED='\033[0;31m'
@@ -14,6 +45,8 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
+
+ensure_venv
 
 PHASE_DIR="$SCRIPT_DIR/$PHASE"
 
@@ -81,12 +114,21 @@ run_test() {
 
     # Run Python
     echo -n "Running Python... "
-    python3 "$python_file" > "$tmp_python" 2>&1 || {
-        echo -e "${RED}FAILED${NC}"
-        cat "$tmp_python"
-        rm -f "$tmp_python" "$tmp_rust"
-        return 1
-    }
+    if [ "${PARITY_ALLOW_CLICK_SRC}" = "1" ]; then
+        "${PYTHON}" "$python_file" > "$tmp_python" 2>&1 || {
+            echo -e "${RED}FAILED${NC}"
+            cat "$tmp_python"
+            rm -f "$tmp_python" "$tmp_rust"
+            return 1
+        }
+    else
+        env -u CLICK_SRC "${PYTHON}" "$python_file" > "$tmp_python" 2>&1 || {
+            echo -e "${RED}FAILED${NC}"
+            cat "$tmp_python"
+            rm -f "$tmp_python" "$tmp_rust"
+            return 1
+        }
+    fi
     echo "done"
 
     if [ "$PHASE" = "phase2" ] || [ "$PHASE" = "phase3" ]; then
