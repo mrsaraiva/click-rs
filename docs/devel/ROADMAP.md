@@ -8,11 +8,11 @@ A comprehensive task list for porting Python Click to Rust. Reference: `/home/ms
 
 **Last Updated:** 2026-02-03
 
-**Project State:** Phases 1–3 complete (Milestone M2 achieved). Core parsing, `Command`/`Group` execution, and help generation are implemented. Unit tests pass (229 + 36). Parity tests pass for phases 1–3 via `tests/parity/run_parity.sh`.
+**Project State:** Phases 1–3 complete (Milestone M2 achieved). Parity suites for phases 1–3 pass via `tests/parity/run_parity.sh`.
 
-**Next Milestone:** Phase 4 (derive macros + help formatting ergonomics).
+**Next Milestone:** M3: Derive Macros (finish decorator-style convenience attributes + Phase 4 parity).
 
-**Notes:** Some roadmap items are implemented with slightly different Rust APIs than the Python references (e.g. context stack helpers are exposed as free functions in `click::globals`), but parity behavior is covered by the phase parity suites.
+**Notes:** Some roadmap items are implemented with slightly different Rust APIs than the Python references. See individual phase tables for remaining gaps.
 
 ## Milestones
 
@@ -150,12 +150,12 @@ These will be resolved during Phase 1-2 implementation. Decisions will be docume
 | Done | `Context::invoked_subcommand` | `core.py:Context.invoked_subcommand` | Active subcommand |
 | Done | `Context::default_map` | `core.py:Context.default_map` | Override defaults |
 | Done | `Context::get_parameter_source()` | `core.py:Context.get_parameter_source` | Source tracking |
-| Todo | `Context::invoke()` smart caller | `core.py:Context.invoke` | Convenience helper (not required for M2) |
-| Todo | `Context::forward()` | `core.py:Context.forward` | Convenience helper (not required for M2) |
+| Done | `Context::invoke()` smart caller | `core.py:Context.invoke` | Implemented as `Context::invoke()` |
+| Done | `Context::forward()` | `core.py:Context.forward` | Implemented as `Context::forward()` |
 | Done | `Context::fail()` helper | `core.py:Context.fail` | Usage error helper |
 | Done | `Context::abort()` helper | `core.py:Context.abort` | Abort helper |
 | Done | `Context::exit()` helper | `core.py:Context.exit` | Exit helper |
-| Todo | `Context::with_resource()` | `core.py:Context.with_resource` | Future ergonomic helper (use `call_on_close` today) |
+| Done | `Context::with_resource()` | `core.py:Context.with_resource` | Implemented as `Context::with_resource()` |
 | Done | `Context::call_on_close()` | `core.py:Context.call_on_close` | Cleanup callbacks |
 | Done | Thread-local context stack | `globals.py` | `get_current_context()` |
 
@@ -279,44 +279,44 @@ These will be resolved during Phase 1-2 implementation. Decisions will be docume
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | Create `click-derive` proc-macro crate | N/A | Separate crate |
-| Todo | `#[derive(Command)]` | `decorators.py:command` | Command from struct |
-| Todo | `#[derive(Group)]` | `decorators.py:group` | Group from struct |
-| Todo | `#[command(...)]` attributes | `decorators.py:command` | name, help, etc. |
-| Todo | `#[option(...)]` field attribute | `decorators.py:option` | Named parameter |
-| Todo | `#[argument(...)]` field attribute | `decorators.py:argument` | Positional parameter |
-| Todo | Name extraction from function | `decorators.py` | Strip _cmd suffix |
-| Todo | Help from doc comments | N/A | Rust convention |
-| Todo | Type inference | N/A | Field type → ParamType |
+| Done | Create `click-derive` proc-macro crate | N/A | Separate crate |
+| Done | `#[derive(Command)]` | `decorators.py:command` | Command from struct |
+| Done | `#[derive(Group)]` | `decorators.py:group` | Group from struct |
+| Done | `#[command(...)]` attributes | `decorators.py:command` | name, help, etc. |
+| Done | `#[option(...)]` field attribute | `decorators.py:option` | Named parameter |
+| Done | `#[argument(...)]` field attribute | `decorators.py:argument` | Positional parameter |
+| Done | Name extraction from function | `decorators.py` | Uses struct name, converts to kebab-case |
+| Done | Help from doc comments | N/A | Rust convention |
+| Done | Type inference | N/A | Field type → ParamType |
 
 ### 4.2 Convenience Macros/Attributes
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `#[version_option]` | `decorators.py:version_option` | Pre-configured --version |
+| Todo | `#[version_option]` | `decorators.py:version_option` | Pre-configured --version (printing/exit behavior pending) |
 | Todo | `#[help_option]` | `decorators.py:help_option` | Pre-configured --help |
-| Todo | `#[confirmation_option]` | `decorators.py:confirmation_option` | --yes confirmation |
-| Todo | `#[password_option]` | `decorators.py:password_option` | Password with confirm |
-| Todo | `#[pass_context]` | `decorators.py:pass_context` | Inject context |
-| Todo | `#[pass_obj]` | `decorators.py:pass_obj` | Inject ctx.obj |
+| Done | `#[confirmation_option]` | `decorators.py:confirmation_option` | --yes confirmation |
+| Done | `#[password_option]` | `decorators.py:password_option` | Password with confirm |
+| Done | `#[pass_context]` | `decorators.py:pass_context` | Inject context |
+| Done | `#[pass_obj]` | `decorators.py:pass_obj` | Inject ctx.obj |
 | Todo | `make_pass_decorator()` equivalent | `decorators.py:make_pass_decorator` | Custom passthrough |
 
 ### 4.3 Help Formatting
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `HelpFormatter` struct | `formatting.py:HelpFormatter` | Help text builder |
-| Todo | `HelpFormatter::write_usage()` | `formatting.py:HelpFormatter.write_usage` | Usage line |
-| Todo | `HelpFormatter::write_heading()` | `formatting.py:HelpFormatter.write_heading` | Section heading |
-| Todo | `HelpFormatter::write_paragraph()` | `formatting.py:HelpFormatter.write_paragraph` | Wrapped text |
-| Todo | `HelpFormatter::write_text()` | `formatting.py:HelpFormatter.write_text` | Raw text |
-| Todo | `HelpFormatter::write_dl()` | `formatting.py:HelpFormatter.write_dl` | Definition list |
-| Todo | `HelpFormatter::section()` | `formatting.py:HelpFormatter.section` | Indented section |
-| Todo | `HelpFormatter::indent()` | `formatting.py:HelpFormatter.indent` | Increase indent |
-| Todo | `HelpFormatter::dedent()` | `formatting.py:HelpFormatter.dedent` | Decrease indent |
-| Todo | Terminal width detection | `formatting.py:wrap_text` | Auto-wrap |
-| Todo | `wrap_text()` function | `formatting.py:wrap_text` | Text wrapping |
-| Todo | Paragraph preservation | `formatting.py:wrap_text` | Double newlines |
+| Done | `HelpFormatter` struct | `formatting.py:HelpFormatter` | Help text builder |
+| Done | `HelpFormatter::write_usage()` | `formatting.py:HelpFormatter.write_usage` | Usage line |
+| Done | `HelpFormatter::write_heading()` | `formatting.py:HelpFormatter.write_heading` | Section heading |
+| Done | `HelpFormatter::write_paragraph()` | `formatting.py:HelpFormatter.write_paragraph` | Wrapped text |
+| Done | `HelpFormatter::write_text()` | `formatting.py:HelpFormatter.write_text` | Raw text |
+| Done | `HelpFormatter::write_dl()` | `formatting.py:HelpFormatter.write_dl` | Definition list (write_definition_list) |
+| Done | `HelpFormatter::section()` | `formatting.py:HelpFormatter.section` | Indented section |
+| Done | `HelpFormatter::indent()` | `formatting.py:HelpFormatter.indent` | Increase indent |
+| Done | `HelpFormatter::dedent()` | `formatting.py:HelpFormatter.dedent` | Decrease indent |
+| Done | Terminal width detection | `formatting.py:wrap_text` | detect_terminal_width() |
+| Done | `wrap_text()` function | `formatting.py:wrap_text` | Text wrapping |
+| Done | Paragraph preservation | `formatting.py:wrap_text` | Double newlines |
 
 ### 4.4 Parity Testing
 
@@ -334,38 +334,38 @@ These will be resolved during Phase 1-2 implementation. Decisions will be docume
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `echo()` function | `utils.py:echo` | Print with color support |
-| Todo | `echo!()` macro | N/A | Rust convenience |
-| Todo | `secho()` function | `utils.py:secho` | Styled echo |
-| Todo | `style()` function | `termui.py:style` | ANSI color/bold text |
-| Todo | Color output control | `utils.py:_default_text_stdout` | Auto-detect TTY |
-| Todo | `echo_via_pager()` | `utils.py:echo_via_pager` | Pipe to less/more |
+| Done | `echo()` function | `utils.py:echo` | Print with color support |
+| Done | `echo!()` macro | N/A | Rust convenience |
+| Done | `secho()` function | `utils.py:secho` | Styled echo |
+| Done | `style()` function | `termui.py:style` | ANSI color/bold text |
+| Done | Color output control | `utils.py:_default_text_stdout` | Auto-detect TTY via isatty() |
+| Done | `echo_via_pager()` | `utils.py:echo_via_pager` | Pipe to less/more |
 
 ### 5.2 Input Functions
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `prompt()` function | `termui.py:prompt` | Interactive input |
-| Todo | Type conversion in prompt | `termui.py:prompt` | With ParamType |
-| Todo | Default value display | `termui.py:prompt` | Show default |
-| Todo | Value processing callback | `termui.py:prompt` | Transform input |
-| Todo | `confirm()` function | `termui.py:confirm` | Yes/no prompt |
-| Todo | Abort on no | `termui.py:confirm` | Optional abort |
-| Todo | `getchar()` function | `termui.py:getchar` | Single char input |
-| Todo | `pause()` function | `termui.py:pause` | Press any key |
-| Todo | Hidden input | `termui.py:prompt` | Password style |
+| Done | `prompt()` function | `termui.py:prompt` | Interactive input |
+| Done | Type conversion in prompt | `termui.py:prompt` | With TypeConverter |
+| Done | Default value display | `termui.py:prompt` | Show default |
+| Done | Value processing callback | `termui.py:prompt` | Transform input |
+| Done | `confirm()` function | `termui.py:confirm` | Yes/no prompt |
+| Done | Abort on no | `termui.py:confirm` | Optional abort |
+| Done | `getchar()` function | `termui.py:getchar` | Single char input |
+| Done | `pause()` function | `termui.py:pause` | Press any key |
+| Done | Hidden input | `termui.py:prompt` | Password style (hide_input param) |
 
 ### 5.3 Progress & Interactive
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `progressbar()` context | `termui.py:progressbar` | Progress indicator |
-| Todo | `ProgressBar` struct | `termui.py:ProgressBar` | ~400 lines in Python |
-| Todo | Bar rendering | `termui.py:ProgressBar` | Character-based |
-| Todo | ETA calculation | `termui.py:ProgressBar` | Time estimation |
-| Todo | `clear()` function | `termui.py:clear` | Clear screen |
-| Todo | `edit()` function | `termui.py:edit` | Launch editor |
-| Todo | `launch()` function | `termui.py:launch` | Open URL/file |
+| Done | `progressbar()` context | `termui.py:progressbar` | Progress indicator |
+| Done | `ProgressBar` struct | `termui.py:ProgressBar` | Character-based rendering |
+| Done | Bar rendering | `termui.py:ProgressBar` | Character-based |
+| Done | ETA calculation | `termui.py:ProgressBar` | Time estimation |
+| Done | `clear()` function | `termui.py:clear` | Clear screen |
+| Done | `edit_text()` function | `termui.py:edit` | Launch editor |
+| Done | `launch()` function | `termui.py:launch` | Open URL/file |
 
 ### 5.4 Parity Testing
 
@@ -382,39 +382,41 @@ These will be resolved during Phase 1-2 implementation. Decisions will be docume
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `ShellComplete` base | `shell_completion.py:ShellComplete` | Abstract base |
-| Todo | `BashComplete` | `shell_completion.py:BashComplete` | Bash completion |
-| Todo | `ZshComplete` | `shell_completion.py:ZshComplete` | Zsh completion |
-| Todo | `FishComplete` | `shell_completion.py:FishComplete` | Fish completion |
-| Todo | `CompletionItem` struct | `shell_completion.py:CompletionItem` | Completion entry |
-| Todo | `get_completion()` | `shell_completion.py:_resolve_context` | Context resolution |
-| Todo | Custom completers | `shell_completion.py` | Parameter.shell_complete |
+| Done | `ShellComplete` base | `shell_completion.py:ShellComplete` | Abstract trait |
+| Done | `BashComplete` | `shell_completion.py:BashComplete` | Bash completion |
+| Done | `ZshComplete` | `shell_completion.py:ZshComplete` | Zsh completion |
+| Done | `FishComplete` | `shell_completion.py:FishComplete` | Fish completion |
+| Done | `CompletionItem` struct | `shell_completion.py:CompletionItem` | Completion entry (in types.rs) |
+| Done | `get_completions()` | `shell_completion.py:_resolve_context` | Context resolution |
+| Done | Custom completers | `shell_completion.py` | TypeConverter::shell_complete |
 
 ### 6.2 Testing Utilities
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `CliRunner` struct | `testing.py:CliRunner` | Test harness |
-| Todo | `CliRunner::invoke()` | `testing.py:CliRunner.invoke` | Run command |
-| Todo | `CliRunner::isolated_filesystem()` | `testing.py:CliRunner.isolated_filesystem` | Temp directory |
-| Todo | `Result` struct | `testing.py:Result` | Invocation result |
-| Todo | `Result::output` | `testing.py:Result.output` | Captured stdout |
-| Todo | `Result::exit_code` | `testing.py:Result.exit_code` | Exit code |
-| Todo | `Result::exception` | `testing.py:Result.exception` | Any error |
-| Todo | Input simulation | `testing.py:CliRunner` | Simulate stdin |
-| Todo | Environment isolation | `testing.py:CliRunner` | Custom env vars |
+| Done | `CliRunner` struct | `testing.py:CliRunner` | Test harness |
+| Done | `CliRunner::invoke()` | `testing.py:CliRunner.invoke` | Run command |
+| Done | `IsolatedFilesystem` | `testing.py:CliRunner.isolated_filesystem` | Temp directory |
+| Done | `InvokeResult` struct | `testing.py:Result` | Invocation result |
+| Done | `InvokeResult::output` | `testing.py:Result.output` | Captured stdout |
+| Done | `InvokeResult::exit_code` | `testing.py:Result.exit_code` | Exit code |
+| Done | `InvokeResult::exception_message` | `testing.py:Result.exception` | Error message |
+| Done | Input simulation | `testing.py:CliRunner` | invoke_with_input() |
+| Done | Environment isolation | `testing.py:CliRunner` | env(), env_unset(), clear_env() |
 
 ### 6.3 Utilities
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `get_binary_stream()` | `utils.py:_default_text_stdout` | Binary stdout/stderr |
-| Todo | `get_text_stream()` | `utils.py:_default_text_stdout` | Text stdout/stderr |
-| Todo | `open_file()` | `utils.py:LazyFile` | Lazy file open |
-| Todo | `format_filename()` | `utils.py:format_filename` | Path formatting |
-| Todo | `get_app_dir()` | `utils.py:get_app_dir` | Platform app dir |
-| Todo | `get_os_args()` | `utils.py` | Get sys.argv |
-| Todo | Environment variable handling | `utils.py` | Case normalization |
+| Done | `get_binary_stdout()` | `utils.py:_default_text_stdout` | Binary stdout |
+| Done | `get_text_stdout/stderr()` | `utils.py:_default_text_stdout` | Text streams |
+| Done | `LazyFile` type | `utils.py:LazyFile` | Lazy file open (in types.rs) |
+| Done | `format_filename()` | `utils.py:format_filename` | Path formatting |
+| Done | `get_app_dir()` | `utils.py:get_app_dir` | Platform app dir |
+| Done | `get_os_args()` | `utils.py` | Get sys.argv |
+| Done | `expand_path()` | `utils.py` | Tilde and envvar expansion |
+| Done | `safecall()` | `utils.py:safecall` | Safe callback invocation |
+| Done | `should_strip_ansi()` | `utils.py` | ANSI output detection |
 
 ### 6.4 Parity Testing
 
@@ -430,12 +432,12 @@ These will be resolved during Phase 1-2 implementation. Decisions will be docume
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `safecall()` wrapper | `utils.py:safecall` | Safe callback invocation |
-| Todo | `make_str()` conversion | `utils.py:make_str` | Bytes → String |
-| Todo | `_expand_args()` | `utils.py:_expand_args` | Glob expansion |
-| Todo | `split_arg_string()` | `shell_completion.py:split_arg_string` | Shell-like splitting |
-| Todo | `_posixify()` name normalization | `core.py:_posixify` | Name cleanup |
-| Todo | `_bashcomplete` environment var check | `shell_completion.py` | Completion mode detection |
+| Done | `safecall()` wrapper | `utils.py:safecall` | Safe callback invocation |
+| N/A | `make_str()` conversion | `utils.py:make_str` | Not needed in Rust (String is UTF-8) |
+| Done | `_expand_args()` | `utils.py:_expand_args` | Implemented as `expand_args()` |
+| Done | `split_arg_string()` | `shell_completion.py:split_arg_string` | Shell-like splitting |
+| Done | Name normalization | `core.py:_posixify` | to_kebab_case in derive macros |
+| Done | Completion mode detection | `shell_completion.py` | CompletionOption struct |
 
 ---
 

@@ -6,3 +6,6 @@ edition = "2021"
 [dependencies]
 click = { path = "../../../../" }
 tempfile = "3.0"
+
+[workspace]
+tempfile = "3.0"

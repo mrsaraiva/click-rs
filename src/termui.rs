@@ -35,9 +35,80 @@
 //! ```
 
 use std::io::{self, BufRead, Write};
+use std::process::{Command as ProcessCommand, Stdio};
 use std::time::Instant;
 
 use crate::error::{ClickError, Result};
+
+// ============================================================================
+// Echo Macro
+// ============================================================================
+
+/// Convenience macro for printing to the terminal.
+///
+/// This macro wraps the `echo` function with a simpler syntax.
+///
+/// # Usage
+///
+/// ```rust,ignore
+/// use click::echo;
+///
+/// // Simple message with newline
+/// echo!("Hello, world!");
+///
+/// // Without newline
+/// echo!("Prompt: ", nl = false);
+///
+/// // To stderr
+/// echo!("Error occurred", err = true);
+///
+/// // Combined
+/// echo!("Warning: ", nl = false, err = true);
+///
+/// // With formatting
+/// echo!("Hello, {}!", name);
+/// ```
+#[macro_export]
+macro_rules! echo {
+    // Basic message
+    ($msg:expr) => {
+        $crate::termui::echo($msg, true, false, None)
+    };
+    // Message with format args
+    ($fmt:expr, $($arg:tt)*) => {{
+        // Check if first arg after format is a keyword arg
+        echo!(@parse $fmt, $($arg)*)
+    }};
+    // Parse keyword arguments
+    (@parse $fmt:expr, nl = $nl:expr) => {
+        $crate::termui::echo($fmt, $nl, false, None)
+    };
+    (@parse $fmt:expr, err = $err:expr) => {
+        $crate::termui::echo($fmt, true, $err, None)
+    };
+    (@parse $fmt:expr, nl = $nl:expr, err = $err:expr) => {
+        $crate::termui::echo($fmt, $nl, $err, None)
+    };
+    (@parse $fmt:expr, err = $err:expr, nl = $nl:expr) => {
+        $crate::termui::echo($fmt, $nl, $err, None)
+    };
+    (@parse $fmt:expr, color = $color:expr) => {
+        $crate::termui::echo($fmt, true, false, $color)
+    };
+    (@parse $fmt:expr, nl = $nl:expr, color = $color:expr) => {
+        $crate::termui::echo($fmt, $nl, false, $color)
+    };
+    (@parse $fmt:expr, err = $err:expr, color = $color:expr) => {
+        $crate::termui::echo($fmt, true, $err, $color)
+    };
+    (@parse $fmt:expr, nl = $nl:expr, err = $err:expr, color = $color:expr) => {
+        $crate::termui::echo($fmt, $nl, $err, $color)
+    };
+    // Format string with args (no keyword args)
+    (@parse $fmt:expr, $($arg:tt)*) => {
+        $crate::termui::echo(&format!($fmt, $($arg)*), true, false, None)
+    };
+}
 
 // ============================================================================
 // Color Constants
@@ -584,6 +655,236 @@ pub fn secho(
     } else {
         print!("{}", styled);
         let _ = io::stdout().flush();
+    }
+}
+
+// ============================================================================
+// Pager Support
+// ============================================================================
+
+/// Display text via a pager.
+///
+/// Pipes the given text to a pager program ($PAGER, less, or more).
+/// Falls back to `echo()` if no pager is available or if not connected to a TTY.
+///
+/// # Arguments
+///
+/// * `text` - The text to display
+/// * `color` - Whether to preserve ANSI color codes (None = auto-detect)
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use click::termui::echo_via_pager;
+///
+/// let long_text = (0..100).map(|i| format!("Line {}", i)).collect::<Vec<_>>().join("\n");
+/// echo_via_pager(&long_text, None);
+/// ```
+pub fn echo_via_pager(text: &str, color: Option<bool>) {
+    // If not a TTY, just echo the text
+    if !stdin_isatty() || !stdout_isatty() {
+        echo(text, true, false, color);
+        return;
+    }
+
+    // Determine the pager command
+    let pager = std::env::var("PAGER")
+        .ok()
+        .filter(|p| !p.is_empty())
+        .unwrap_or_else(|| {
+            // Try to find less or more
+            if which_pager("less").is_some() {
+                "less".to_string()
+            } else if which_pager("more").is_some() {
+                "more".to_string()
+            } else {
+                String::new()
+            }
+        });
+
+    if pager.is_empty() {
+        // No pager available, fall back to echo
+        echo(text, true, false, color);
+        return;
+    }
+
+    // Prepare the text (strip ANSI codes if color is disabled)
+    let output_text = if color == Some(false) {
+        strip_ansi_codes(text)
+    } else {
+        text.to_string()
+    };
+
+    // Build the pager command with proper arguments
+    let mut parts = pager.split_whitespace();
+    let cmd_name = match parts.next() {
+        Some(name) => name,
+        None => {
+            echo(&output_text, true, false, color);
+            return;
+        }
+    };
+
+    let mut cmd = ProcessCommand::new(cmd_name);
+
+    // Add any additional arguments from $PAGER
+    for arg in parts {
+        cmd.arg(arg);
+    }
+
+    // If using less and color is enabled, add -R flag for raw control characters
+    if cmd_name == "less" && color != Some(false) {
+        cmd.arg("-R");
+    }
+
+    // Try to spawn the pager and pipe text to it
+    match cmd.stdin(Stdio::piped()).spawn() {
+        Ok(mut child) => {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(output_text.as_bytes());
+            }
+            // Wait for pager to finish
+            let _ = child.wait();
+        }
+        Err(_) => {
+            // Pager failed to start, fall back to echo
+            echo(&output_text, true, false, color);
+        }
+    }
+}
+
+/// Check if a pager command exists in PATH.
+fn which_pager(name: &str) -> Option<String> {
+    if let Ok(path) = std::env::var("PATH") {
+        for dir in path.split(':') {
+            let full_path = std::path::Path::new(dir).join(name);
+            if full_path.exists() {
+                return Some(full_path.to_string_lossy().into_owned());
+            }
+        }
+    }
+    None
+}
+
+// ============================================================================
+// Launch Support
+// ============================================================================
+
+/// Open a URL or file path in the default application.
+///
+/// Uses platform-specific commands to launch the associated application:
+/// - macOS: `open`
+/// - Linux: `xdg-open`
+/// - Windows: `start`
+///
+/// # Arguments
+///
+/// * `url` - The URL or file path to open
+/// * `wait` - If true, wait for the application to finish before returning
+/// * `locate` - If true, open a file manager showing the file location instead
+///
+/// # Returns
+///
+/// `Ok(())` on success, or an error if the launch failed.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use click::termui::launch;
+///
+/// // Open a URL in the default browser
+/// launch("https://example.com", false, false)?;
+///
+/// // Open a file in its default application
+/// launch("/path/to/document.pdf", false, false)?;
+///
+/// // Show file location in file manager
+/// launch("/path/to/file.txt", false, true)?;
+/// ```
+pub fn launch(url: &str, wait: bool, locate: bool) -> Result<()> {
+    let (cmd, args) = get_launch_command(url, locate)?;
+
+    let mut command = ProcessCommand::new(&cmd);
+    command.args(&args);
+
+    if wait {
+        let status = command.status().map_err(|e| {
+            ClickError::usage(format!("Failed to launch '{}': {}", url, e))
+        })?;
+
+        if !status.success() {
+            return Err(ClickError::usage(format!(
+                "Launch command failed with exit code: {:?}",
+                status.code()
+            )));
+        }
+    } else {
+        // Spawn without waiting
+        command.spawn().map_err(|e| {
+            ClickError::usage(format!("Failed to launch '{}': {}", url, e))
+        })?;
+    }
+
+    Ok(())
+}
+
+/// Get the platform-specific launch command and arguments.
+fn get_launch_command(url: &str, locate: bool) -> Result<(String, Vec<String>)> {
+    #[cfg(target_os = "macos")]
+    {
+        if locate {
+            Ok(("open".to_string(), vec!["-R".to_string(), url.to_string()]))
+        } else {
+            Ok(("open".to_string(), vec![url.to_string()]))
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if locate {
+            // Try to use a file manager that supports revealing files
+            // First try dbus with nautilus/dolphin, fall back to xdg-open on parent dir
+            let path = std::path::Path::new(url);
+            if let Some(parent) = path.parent() {
+                Ok((
+                    "xdg-open".to_string(),
+                    vec![parent.to_string_lossy().into_owned()],
+                ))
+            } else {
+                Err(ClickError::usage(format!(
+                    "Cannot locate file: {}",
+                    url
+                )))
+            }
+        } else {
+            Ok(("xdg-open".to_string(), vec![url.to_string()]))
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if locate {
+            // Use explorer with /select to highlight the file
+            Ok((
+                "explorer".to_string(),
+                vec!["/select,".to_string() + url],
+            ))
+        } else {
+            // Use cmd /c start for URLs and files
+            Ok((
+                "cmd".to_string(),
+                vec!["/c".to_string(), "start".to_string(), "".to_string(), url.to_string()],
+            ))
+        }
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        let _ = locate; // suppress unused warning
+        Err(ClickError::usage(format!(
+            "Platform not supported for launch: {}",
+            url
+        )))
     }
 }
 

@@ -5,8 +5,8 @@ use quote::quote;
 use syn::{Data, DeriveInput, Error, Fields, Ident, Result, Type};
 
 use crate::attrs::{
-    extract_doc_comment, is_bool_type, is_option_type, is_vec_type, to_kebab_case, ArgumentAttr,
-    FieldAttr, GroupAttr, OptionAttr,
+    extract_doc_comment, extract_inner_type, is_bool_type, is_option_type, is_vec_type,
+    to_kebab_case, ArgumentAttr, FieldAttr, GroupAttr, OptionAttr,
 };
 
 /// Parsed field information
@@ -403,6 +403,42 @@ fn generate_field_extractions(fields: &[FieldInfo]) -> Result<Vec<TokenStream>> 
                 extractions.push(quote! {
                     let #field_name = Default::default();
                 });
+            }
+            FieldAttr::PassContext => {
+                let msg = format!(
+                    "click-derive: #[pass_context] requires an active thread-local context (field `{}`)",
+                    field_name_str
+                );
+                if is_option_type(field_ty) {
+                    extractions.push(quote! {
+                        let #field_name = click::context::get_current_context();
+                    });
+                } else {
+                    extractions.push(quote! {
+                        let #field_name = click::context::get_current_context()
+                            .ok_or_else(|| click::ClickError::usage(#msg))?;
+                    });
+                }
+            }
+            FieldAttr::PassObj => {
+                let msg = format!(
+                    "click-derive: #[pass_obj] requires a context object of the expected type (field `{}`)",
+                    field_name_str
+                );
+                if is_option_type(field_ty) {
+                    let inner_ty = extract_inner_type(field_ty).ok_or_else(|| {
+                        Error::new_spanned(field_ty, "#[pass_obj] requires a concrete Option<T> type")
+                    })?;
+                    extractions.push(quote! {
+                        let #field_name = ctx.obj::<#inner_ty>().cloned();
+                    });
+                } else {
+                    extractions.push(quote! {
+                        let #field_name = ctx.obj::<#field_ty>()
+                            .cloned()
+                            .ok_or_else(|| click::ClickError::usage(#msg))?;
+                    });
+                }
             }
             FieldAttr::Skip => {
                 extractions.push(quote! {

@@ -135,7 +135,8 @@ pub use types::{
 
 // Re-export terminal UI functions
 pub use termui::{
-    clear, confirm, echo, get_terminal_size, getchar, isatty, pause, prompt, secho, style, Color,
+    clear, confirm, echo, edit_text, get_terminal_size, getchar, isatty, pause, progressbar,
+    prompt, secho, stderr_isatty, stdin_isatty, stdout_isatty, strip_ansi_codes, style, Color,
     ProgressBar,
 };
 

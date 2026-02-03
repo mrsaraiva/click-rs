@@ -87,7 +87,20 @@ use group::expand_group;
 ///     target: String,
 /// }
 /// ```
-#[proc_macro_derive(Command, attributes(command, option, argument))]
+#[proc_macro_derive(
+    Command,
+    attributes(
+        command,
+        option,
+        argument,
+        pass_context,
+        pass_obj,
+        version_option,
+        help_option,
+        confirmation_option,
+        password_option
+    )
+)]
 pub fn derive_command(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     expand_command(input)
@@ -126,7 +139,10 @@ pub fn derive_command(input: TokenStream) -> TokenStream {
 ///     Remove(RemoveCmd),
 /// }
 /// ```
-#[proc_macro_derive(Group, attributes(group, option, argument, subcommand))]
+#[proc_macro_derive(
+    Group,
+    attributes(group, option, argument, subcommand, pass_context, pass_obj)
+)]
 pub fn derive_group(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     expand_group(input)

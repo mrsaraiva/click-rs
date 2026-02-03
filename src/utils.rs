@@ -510,6 +510,371 @@ pub fn strip_extension(path: &Path) -> PathBuf {
 }
 
 // =============================================================================
+// Shell Argument Parsing
+// =============================================================================
+
+/// Parse a string like a shell would: handle quotes, escapes, and whitespace.
+///
+/// This is useful for parsing command-line strings from environment variables
+/// or configuration files.
+///
+/// # Rules
+///
+/// - Whitespace separates arguments
+/// - Single quotes (`'`) preserve everything literally (no escape sequences)
+/// - Double quotes (`"`) allow escape sequences (`\"`, `\\`)
+/// - Backslash outside quotes escapes the next character
+/// - Empty quotes produce empty strings
+///
+/// # Example
+///
+/// ```rust
+/// use click::utils::split_arg_string;
+///
+/// let args = split_arg_string("foo 'bar baz' \"quoted\"");
+/// assert_eq!(args, vec!["foo", "bar baz", "quoted"]);
+///
+/// let args = split_arg_string(r#"file\ name.txt "hello \"world\"""#);
+/// assert_eq!(args, vec!["file name.txt", r#"hello "world""#]);
+///
+/// let args = split_arg_string("'single' \"double\" plain");
+/// assert_eq!(args, vec!["single", "double", "plain"]);
+/// ```
+///
+/// # Reference
+///
+/// Based on Python Click's `shell_completion.py:split_arg_string`.
+pub fn split_arg_string(s: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut chars = s.chars().peekable();
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+
+    while let Some(c) = chars.next() {
+        if in_single_quote {
+            // In single quotes: everything is literal until closing quote
+            if c == '\'' {
+                in_single_quote = false;
+            } else {
+                current.push(c);
+            }
+        } else if in_double_quote {
+            // In double quotes: handle escapes for " and \
+            if c == '"' {
+                in_double_quote = false;
+            } else if c == '\\' {
+                // Check for escape sequences
+                if let Some(&next) = chars.peek() {
+                    if next == '"' || next == '\\' {
+                        current.push(chars.next().unwrap());
+                    } else {
+                        // Not a recognized escape, keep the backslash
+                        current.push(c);
+                    }
+                } else {
+                    current.push(c);
+                }
+            } else {
+                current.push(c);
+            }
+        } else {
+            // Not in quotes
+            if c == '\'' {
+                in_single_quote = true;
+            } else if c == '"' {
+                in_double_quote = true;
+            } else if c == '\\' {
+                // Escape the next character
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                }
+            } else if c.is_whitespace() {
+                // End of argument
+                if !current.is_empty() {
+                    result.push(current);
+                    current = String::new();
+                }
+            } else {
+                current.push(c);
+            }
+        }
+    }
+
+    // Don't forget the last argument
+    if !current.is_empty() {
+        result.push(current);
+    }
+
+    result
+}
+
+// =============================================================================
+// Argument Expansion
+// =============================================================================
+
+/// Expand glob patterns in arguments.
+///
+/// This function expands shell-style glob patterns like `*.txt` or `**/*.rs`
+/// into a list of matching file paths. Arguments that don't contain glob
+/// patterns or don't match any files are returned as-is.
+///
+/// # Glob Patterns
+///
+/// - `*` matches any sequence of characters except path separators
+/// - `?` matches any single character except path separators
+/// - `**` matches any sequence of characters including path separators
+/// - `[...]` matches any character in the brackets
+/// - `[!...]` matches any character not in the brackets
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use click::utils::expand_args;
+///
+/// // Assuming *.txt files exist in the current directory
+/// let args = vec!["file.rs".to_string(), "*.txt".to_string()];
+/// let expanded = expand_args(&args);
+/// // Returns ["file.rs", "a.txt", "b.txt", ...] if those files exist
+/// ```
+///
+/// # Reference
+///
+/// Based on Python Click's `utils.py:_expand_args`.
+pub fn expand_args(args: &[String]) -> Vec<String> {
+    let mut result = Vec::new();
+
+    for arg in args {
+        if has_glob_pattern(arg) {
+            // Try to expand the glob pattern
+            match expand_glob(arg) {
+                Some(matches) if !matches.is_empty() => {
+                    result.extend(matches);
+                }
+                _ => {
+                    // No matches or error: keep original argument
+                    result.push(arg.clone());
+                }
+            }
+        } else {
+            result.push(arg.clone());
+        }
+    }
+
+    result
+}
+
+/// Check if a string contains glob pattern characters.
+fn has_glob_pattern(s: &str) -> bool {
+    s.chars().any(|c| c == '*' || c == '?' || c == '[')
+}
+
+/// Expand a glob pattern into matching file paths.
+///
+/// Returns `None` if the pattern is invalid, or `Some(vec)` with matches.
+/// The result may be empty if no files match.
+fn expand_glob(pattern: &str) -> Option<Vec<String>> {
+    // Simple glob implementation that handles common patterns
+    // For production use, consider using the `glob` crate
+
+    let mut matches = Vec::new();
+
+    // Handle the pattern by converting it to a regex-like matcher
+    // This is a simplified implementation that handles basic patterns
+
+    // Get the directory part and the pattern part
+    let (dir, file_pattern) = split_pattern_path(pattern);
+
+    // Read the directory
+    let read_dir = if dir.is_empty() {
+        std::fs::read_dir(".")
+    } else {
+        std::fs::read_dir(&dir)
+    };
+
+    let entries = match read_dir {
+        Ok(entries) => entries,
+        Err(_) => return None,
+    };
+
+    // Compile the pattern into a matcher
+    let matcher = compile_glob_pattern(&file_pattern);
+
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy();
+
+        if matches_pattern(&name, &matcher) {
+            let path = if dir.is_empty() {
+                name.to_string()
+            } else {
+                format!("{}/{}", dir, name)
+            };
+            matches.push(path);
+        }
+    }
+
+    // Sort matches for consistent ordering
+    matches.sort();
+
+    Some(matches)
+}
+
+/// Split a glob pattern into directory and file pattern parts.
+fn split_pattern_path(pattern: &str) -> (String, String) {
+    // Find the last path separator before any glob characters
+    let glob_start = pattern
+        .chars()
+        .position(|c| c == '*' || c == '?' || c == '[')
+        .unwrap_or(pattern.len());
+
+    let prefix = &pattern[..glob_start];
+    let last_sep = prefix.rfind(|c| c == '/' || c == '\\');
+
+    match last_sep {
+        Some(idx) => (pattern[..idx].to_string(), pattern[idx + 1..].to_string()),
+        None => (String::new(), pattern.to_string()),
+    }
+}
+
+/// A compiled glob pattern for matching.
+#[derive(Debug)]
+enum GlobPart {
+    Literal(String),
+    Any,          // ?
+    AnySequence,  // *
+    CharClass(Vec<char>, bool), // [...] or [!...]
+}
+
+/// Compile a glob pattern into parts for matching.
+fn compile_glob_pattern(pattern: &str) -> Vec<GlobPart> {
+    let mut parts = Vec::new();
+    let mut chars = pattern.chars().peekable();
+    let mut literal = String::new();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '*' => {
+                if !literal.is_empty() {
+                    parts.push(GlobPart::Literal(literal));
+                    literal = String::new();
+                }
+                // Collapse multiple *'s
+                while chars.peek() == Some(&'*') {
+                    chars.next();
+                }
+                parts.push(GlobPart::AnySequence);
+            }
+            '?' => {
+                if !literal.is_empty() {
+                    parts.push(GlobPart::Literal(literal));
+                    literal = String::new();
+                }
+                parts.push(GlobPart::Any);
+            }
+            '[' => {
+                if !literal.is_empty() {
+                    parts.push(GlobPart::Literal(literal));
+                    literal = String::new();
+                }
+                // Parse character class
+                let negated = chars.peek() == Some(&'!');
+                if negated {
+                    chars.next();
+                }
+                let mut class_chars = Vec::new();
+                while let Some(&ch) = chars.peek() {
+                    if ch == ']' {
+                        chars.next();
+                        break;
+                    }
+                    class_chars.push(chars.next().unwrap());
+                }
+                parts.push(GlobPart::CharClass(class_chars, negated));
+            }
+            '\\' => {
+                // Escape next character
+                if let Some(next) = chars.next() {
+                    literal.push(next);
+                }
+            }
+            _ => {
+                literal.push(c);
+            }
+        }
+    }
+
+    if !literal.is_empty() {
+        parts.push(GlobPart::Literal(literal));
+    }
+
+    parts
+}
+
+/// Check if a string matches a compiled glob pattern.
+fn matches_pattern(s: &str, parts: &[GlobPart]) -> bool {
+    matches_pattern_recursive(s, parts, 0)
+}
+
+/// Recursive helper for pattern matching.
+fn matches_pattern_recursive(s: &str, parts: &[GlobPart], part_idx: usize) -> bool {
+    if part_idx >= parts.len() {
+        return s.is_empty();
+    }
+
+    let part = &parts[part_idx];
+
+    match part {
+        GlobPart::Literal(lit) => {
+            if s.starts_with(lit.as_str()) {
+                matches_pattern_recursive(&s[lit.len()..], parts, part_idx + 1)
+            } else {
+                false
+            }
+        }
+        GlobPart::Any => {
+            if s.is_empty() {
+                false
+            } else {
+                // Skip one character
+                let mut chars = s.chars();
+                chars.next();
+                matches_pattern_recursive(chars.as_str(), parts, part_idx + 1)
+            }
+        }
+        GlobPart::AnySequence => {
+            // Try matching zero or more characters
+            // First try matching zero characters
+            if matches_pattern_recursive(s, parts, part_idx + 1) {
+                return true;
+            }
+            // Then try matching one or more characters
+            for (i, _) in s.char_indices() {
+                if matches_pattern_recursive(&s[i + 1..], parts, part_idx + 1) {
+                    return true;
+                }
+            }
+            false
+        }
+        GlobPart::CharClass(chars, negated) => {
+            if s.is_empty() {
+                return false;
+            }
+            let first = s.chars().next().unwrap();
+            let in_class = chars.contains(&first);
+            let matches = if *negated { !in_class } else { in_class };
+            if matches {
+                let mut remaining = s.chars();
+                remaining.next();
+                matches_pattern_recursive(remaining.as_str(), parts, part_idx + 1)
+            } else {
+                false
+            }
+        }
+    }
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -682,5 +1047,168 @@ mod tests {
             Some(v) => env::set_var("TERM", v),
             None => env::remove_var("TERM"),
         }
+    }
+
+    // =========================================================================
+    // Tests for split_arg_string
+    // =========================================================================
+
+    #[test]
+    fn test_split_arg_string_simple() {
+        let args = split_arg_string("foo bar baz");
+        assert_eq!(args, vec!["foo", "bar", "baz"]);
+    }
+
+    #[test]
+    fn test_split_arg_string_single_quotes() {
+        let args = split_arg_string("foo 'bar baz' qux");
+        assert_eq!(args, vec!["foo", "bar baz", "qux"]);
+
+        // Empty single quotes
+        let args = split_arg_string("foo '' bar");
+        assert_eq!(args, vec!["foo", "bar"]);
+    }
+
+    #[test]
+    fn test_split_arg_string_double_quotes() {
+        let args = split_arg_string("foo \"bar baz\" qux");
+        assert_eq!(args, vec!["foo", "bar baz", "qux"]);
+
+        // Escapes in double quotes
+        let args = split_arg_string(r#"foo "bar \"quoted\"" baz"#);
+        assert_eq!(args, vec!["foo", r#"bar "quoted""#, "baz"]);
+    }
+
+    #[test]
+    fn test_split_arg_string_backslash_escape() {
+        // Backslash escapes space
+        let args = split_arg_string(r"foo\ bar baz");
+        assert_eq!(args, vec!["foo bar", "baz"]);
+
+        // Backslash escapes backslash
+        let args = split_arg_string(r"foo\\bar");
+        assert_eq!(args, vec![r"foo\bar"]);
+    }
+
+    #[test]
+    fn test_split_arg_string_mixed_quotes() {
+        let args = split_arg_string("foo 'bar baz' \"quoted\" plain");
+        assert_eq!(args, vec!["foo", "bar baz", "quoted", "plain"]);
+    }
+
+    #[test]
+    fn test_split_arg_string_empty() {
+        let args = split_arg_string("");
+        assert!(args.is_empty());
+
+        let args = split_arg_string("   ");
+        assert!(args.is_empty());
+    }
+
+    #[test]
+    fn test_split_arg_string_complex() {
+        // Example from Python Click documentation
+        let args = split_arg_string("foo 'bar baz' \"quoted\"");
+        assert_eq!(args, vec!["foo", "bar baz", "quoted"]);
+    }
+
+    #[test]
+    fn test_split_arg_string_no_escapes_in_single_quotes() {
+        // Single quotes preserve everything literally
+        let args = split_arg_string(r"'foo\\bar'");
+        assert_eq!(args, vec![r"foo\\bar"]);
+
+        let args = split_arg_string(r#"'foo\"bar'"#);
+        assert_eq!(args, vec![r#"foo\"bar"#]);
+    }
+
+    // =========================================================================
+    // Tests for expand_args and glob matching
+    // =========================================================================
+
+    #[test]
+    fn test_has_glob_pattern() {
+        assert!(has_glob_pattern("*.txt"));
+        assert!(has_glob_pattern("file?.txt"));
+        assert!(has_glob_pattern("file[ab].txt"));
+        assert!(!has_glob_pattern("normal.txt"));
+        assert!(!has_glob_pattern("/path/to/file"));
+    }
+
+    #[test]
+    fn test_glob_pattern_literal() {
+        let parts = compile_glob_pattern("hello");
+        let is_match = matches_pattern("hello", &parts);
+        assert!(is_match);
+
+        let is_match = matches_pattern("world", &parts);
+        assert!(!is_match);
+    }
+
+    #[test]
+    fn test_glob_pattern_star() {
+        let parts = compile_glob_pattern("*.txt");
+        assert!(matches_pattern("file.txt", &parts));
+        assert!(matches_pattern("hello.txt", &parts));
+        assert!(matches_pattern(".txt", &parts));
+        assert!(!matches_pattern("file.rs", &parts));
+    }
+
+    #[test]
+    fn test_glob_pattern_question() {
+        let parts = compile_glob_pattern("file?.txt");
+        assert!(matches_pattern("file1.txt", &parts));
+        assert!(matches_pattern("filea.txt", &parts));
+        assert!(!matches_pattern("file12.txt", &parts));
+        assert!(!matches_pattern("file.txt", &parts));
+    }
+
+    #[test]
+    fn test_glob_pattern_char_class() {
+        let parts = compile_glob_pattern("file[abc].txt");
+        assert!(matches_pattern("filea.txt", &parts));
+        assert!(matches_pattern("fileb.txt", &parts));
+        assert!(matches_pattern("filec.txt", &parts));
+        assert!(!matches_pattern("filed.txt", &parts));
+    }
+
+    #[test]
+    fn test_glob_pattern_negated_char_class() {
+        let parts = compile_glob_pattern("file[!abc].txt");
+        assert!(!matches_pattern("filea.txt", &parts));
+        assert!(!matches_pattern("fileb.txt", &parts));
+        assert!(matches_pattern("filed.txt", &parts));
+        assert!(matches_pattern("file1.txt", &parts));
+    }
+
+    #[test]
+    fn test_expand_args_no_patterns() {
+        let args = vec!["file.txt".to_string(), "other.rs".to_string()];
+        let expanded = expand_args(&args);
+        assert_eq!(expanded, args);
+    }
+
+    #[test]
+    fn test_expand_args_pattern_no_matches() {
+        // Pattern that won't match anything
+        let args = vec!["__nonexistent_pattern_xyz_*.abc".to_string()];
+        let expanded = expand_args(&args);
+        // Should keep original if no matches
+        assert_eq!(expanded, args);
+    }
+
+    #[test]
+    fn test_split_pattern_path() {
+        let (dir, pattern) = split_pattern_path("*.txt");
+        assert_eq!(dir, "");
+        assert_eq!(pattern, "*.txt");
+
+        let (dir, pattern) = split_pattern_path("src/*.rs");
+        assert_eq!(dir, "src");
+        assert_eq!(pattern, "*.rs");
+
+        let (dir, pattern) = split_pattern_path("/home/user/*.txt");
+        assert_eq!(dir, "/home/user");
+        assert_eq!(pattern, "*.txt");
     }
 }

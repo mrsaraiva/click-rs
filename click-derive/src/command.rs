@@ -6,7 +6,8 @@ use syn::{Data, DeriveInput, Error, Fields, Ident, Result, Type};
 
 use crate::attrs::{
     extract_doc_comment, extract_inner_type, is_bool_type, is_option_type, is_vec_type,
-    to_kebab_case, ArgumentAttr, CommandAttr, FieldAttr, OptionAttr,
+    to_kebab_case, ArgumentAttr, CommandAttr, ConfirmationOptionAttr, FieldAttr, HelpOptionAttr,
+    OptionAttr, PasswordOptionAttr, VersionOptionAttr,
 };
 
 /// Parsed field information
@@ -17,12 +18,28 @@ struct FieldInfo {
     doc: Option<String>,
 }
 
+/// Container-level convenience options parsed from attributes
+struct ConvenienceOptions {
+    version_option: Option<VersionOptionAttr>,
+    _help_option: Option<HelpOptionAttr>,
+    confirmation_option: Option<ConfirmationOptionAttr>,
+    password_option: Option<PasswordOptionAttr>,
+}
+
 /// Expand the Command derive macro
 pub fn expand_command(input: DeriveInput) -> Result<TokenStream> {
     let name = &input.ident;
 
     // Parse container attributes
     let cmd_attr = CommandAttr::from_attrs(&input.attrs)?;
+
+    // Parse convenience option attributes
+    let convenience_opts = ConvenienceOptions {
+        version_option: VersionOptionAttr::from_attrs(&input.attrs)?,
+        _help_option: HelpOptionAttr::from_attrs(&input.attrs)?,
+        confirmation_option: ConfirmationOptionAttr::from_attrs(&input.attrs)?,
+        password_option: PasswordOptionAttr::from_attrs(&input.attrs)?,
+    };
 
     // Get doc comment for help
     let doc_comment = extract_doc_comment(&input.attrs);
@@ -83,6 +100,9 @@ pub fn expand_command(input: DeriveInput) -> Result<TokenStream> {
     // Generate argument builders
     let argument_builders = generate_argument_builders(&field_infos)?;
 
+    // Generate convenience option builders
+    let convenience_option_builders = generate_convenience_option_builders(&convenience_opts, &cmd_name);
+
     // Generate field extraction from context
     let field_extractions = generate_field_extractions(&field_infos)?;
 
@@ -136,6 +156,7 @@ pub fn expand_command(input: DeriveInput) -> Result<TokenStream> {
                     #deprecated_opt
                     #(#option_builders)*
                     #(#argument_builders)*
+                    #(#convenience_option_builders)*
                     .build()
             }
 
@@ -157,6 +178,7 @@ pub fn expand_command(input: DeriveInput) -> Result<TokenStream> {
                     #deprecated_opt
                     #(#option_builders)*
                     #(#argument_builders)*
+                    #(#convenience_option_builders)*
                     .callback(move |ctx| {
                         let instance = #name::from_context(ctx)?;
                         run_fn(instance, ctx)
@@ -184,6 +206,65 @@ pub fn expand_command(input: DeriveInput) -> Result<TokenStream> {
     };
 
     Ok(output)
+}
+
+/// Generate convenience option builders (version, confirmation, password)
+fn generate_convenience_option_builders(
+    opts: &ConvenienceOptions,
+    _cmd_name: &str,
+) -> Vec<TokenStream> {
+    let mut builders = Vec::new();
+
+    // Version option: --version / -V
+    if let Some(ref ver_attr) = opts.version_option {
+        let help = ver_attr.help.clone().unwrap_or_else(|| "Show the version and exit.".to_string());
+
+        // We use a special eager callback that prints version and exits
+        // For now, we create a bool_flag option that the user must check
+        builders.push(quote! {
+            .option(
+                click::ClickOption::new(&["--version", "-V"])
+                    .help(#help)
+                    .bool_flag()
+                    .eager()
+                    .build()
+            )
+        });
+    }
+
+    // Confirmation option: --yes / -y
+    if let Some(ref conf_attr) = opts.confirmation_option {
+        let help = conf_attr.help.clone().unwrap_or_else(|| "Confirm the action without prompting.".to_string());
+
+        builders.push(quote! {
+            .option(
+                click::ClickOption::new(&["--yes", "-y"])
+                    .help(#help)
+                    .bool_flag()
+                    .build()
+            )
+        });
+    }
+
+    // Password option: --password with hidden input
+    if let Some(ref pass_attr) = opts.password_option {
+        let prompt = pass_attr.prompt.clone().unwrap_or_else(|| "Password".to_string());
+        let help = pass_attr.help.clone().unwrap_or_default();
+        let confirmation = pass_attr.confirmation_prompt;
+
+        builders.push(quote! {
+            .option(
+                click::ClickOption::new(&["--password"])
+                    .help(#help)
+                    .prompt(#prompt)
+                    .hide_input(true)
+                    .confirmation_prompt(#confirmation)
+                    .build()
+            )
+        });
+    }
+
+    builders
 }
 
 /// Generate option builder calls
@@ -408,6 +489,42 @@ fn generate_field_extractions(fields: &[FieldInfo]) -> Result<Vec<TokenStream>> 
                 extractions.push(quote! {
                     let #field_name = Default::default();
                 });
+            }
+            FieldAttr::PassContext => {
+                let msg = format!(
+                    "click-derive: #[pass_context] requires an active thread-local context (field `{}`)",
+                    field_name_str
+                );
+                if is_option_type(field_ty) {
+                    extractions.push(quote! {
+                        let #field_name = click::context::get_current_context();
+                    });
+                } else {
+                    extractions.push(quote! {
+                        let #field_name = click::context::get_current_context()
+                            .ok_or_else(|| click::ClickError::usage(#msg))?;
+                    });
+                }
+            }
+            FieldAttr::PassObj => {
+                let msg = format!(
+                    "click-derive: #[pass_obj] requires a context object of the expected type (field `{}`)",
+                    field_name_str
+                );
+                if is_option_type(field_ty) {
+                    let inner_ty = extract_inner_type(field_ty).ok_or_else(|| {
+                        Error::new_spanned(field_ty, "#[pass_obj] requires a concrete Option<T> type")
+                    })?;
+                    extractions.push(quote! {
+                        let #field_name = ctx.obj::<#inner_ty>().cloned();
+                    });
+                } else {
+                    extractions.push(quote! {
+                        let #field_name = ctx.obj::<#field_ty>()
+                            .cloned()
+                            .ok_or_else(|| click::ClickError::usage(#msg))?;
+                    });
+                }
             }
             FieldAttr::Skip => {
                 extractions.push(quote! {

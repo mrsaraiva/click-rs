@@ -6,3 +6,5 @@ publish = false
 
 [dependencies]
 click = { path = "../../../.." }
+
+[workspace]

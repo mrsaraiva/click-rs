@@ -40,8 +40,18 @@ name = "click"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "click-derive",
  "thiserror",
  "uuid",
+]
+
+[[package]]
+name = "click-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

@@ -1,5 +1,6 @@
 [workspace]
 members = [".", "click-derive"]
+exclude = ["tests/parity/phase1/rust", "tests/parity/phase2/rust", "tests/parity/phase3/rust"]
 
 [package]
 name = "click"

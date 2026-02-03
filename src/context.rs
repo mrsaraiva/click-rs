@@ -669,6 +669,216 @@ impl Context {
             .and_then(|map| map.get(name))
             .map(|v| v.as_ref() as &dyn Any)
     }
+
+    /// Programmatically invoke another command with the given arguments.
+    ///
+    /// This creates a child context for the invoked command and runs it.
+    /// The invoked command will have this context as its parent.
+    ///
+    /// This is useful for calling other commands from within a command callback,
+    /// similar to Python Click's `ctx.invoke()`.
+    ///
+    /// # Arguments
+    ///
+    /// * `cmd` - The command to invoke
+    /// * `args` - The arguments to pass to the command
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use click::command::Command;
+    /// use click::context::ContextBuilder;
+    /// use std::sync::Arc;
+    /// use std::sync::atomic::{AtomicBool, Ordering};
+    ///
+    /// let invoked = Arc::new(AtomicBool::new(false));
+    /// let invoked_clone = Arc::clone(&invoked);
+    ///
+    /// let other_cmd = Command::new("other")
+    ///     .callback(move |_ctx| {
+    ///         invoked_clone.store(true, Ordering::SeqCst);
+    ///         Ok(())
+    ///     })
+    ///     .build();
+    ///
+    /// let ctx = Arc::new(ContextBuilder::new().info_name("main").build());
+    /// let result = ctx.invoke(&other_cmd, &[]);
+    /// assert!(result.is_ok());
+    /// assert!(invoked.load(Ordering::SeqCst));
+    /// ```
+    pub fn invoke(
+        self: &Arc<Self>,
+        cmd: &dyn crate::group::CommandLike,
+        args: &[String],
+    ) -> Result<(), ClickError> {
+        // Get the command name for the child context
+        let cmd_name = cmd.name().unwrap_or("invoked");
+
+        // Create child context with this context as parent
+        let child_ctx = cmd.make_context(cmd_name, args.to_vec(), Some(Arc::clone(self)))?;
+        let child_ctx = Arc::new(child_ctx);
+
+        // Push child context onto thread-local stack
+        push_context(Arc::clone(&child_ctx));
+
+        // Invoke the command
+        let result = cmd.invoke(&child_ctx);
+
+        // Pop context
+        pop_context();
+
+        // Run close callbacks on child
+        child_ctx.close();
+
+        result
+    }
+
+    /// Forward the current context's parameters to another command.
+    ///
+    /// This is similar to [`invoke`](Self::invoke), but reuses the current context's
+    /// parameter values instead of parsing new arguments. The invoked command will
+    /// see the same parameter values as this context.
+    ///
+    /// This is useful for delegating to another command while preserving the
+    /// current context's state, similar to Python Click's `ctx.forward()`.
+    ///
+    /// # Arguments
+    ///
+    /// * `cmd` - The command to forward to
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use click::command::Command;
+    /// use click::context::ContextBuilder;
+    /// use click::group::CommandLike;
+    /// use std::sync::Arc;
+    ///
+    /// let other_cmd = Command::new("other")
+    ///     .callback(|ctx| {
+    ///         // This command will see the forwarded params
+    ///         if let Some(name) = ctx.get_param::<String>("name") {
+    ///             println!("Forwarded name: {}", name);
+    ///         }
+    ///         Ok(())
+    ///     })
+    ///     .build();
+    ///
+    /// let mut ctx = ContextBuilder::new().info_name("main").build();
+    /// ctx.params_mut().insert("name".to_string(), Arc::new("Alice".to_string()));
+    /// let ctx = Arc::new(ctx);
+    ///
+    /// let result = ctx.forward(&other_cmd);
+    /// assert!(result.is_ok());
+    /// ```
+    pub fn forward(
+        self: &Arc<Self>,
+        cmd: &dyn crate::group::CommandLike,
+    ) -> Result<(), ClickError> {
+        // Get the command name for the child context
+        let cmd_name = cmd.name().unwrap_or("forwarded");
+
+        // Create a child context builder with this context as parent
+        let child_builder = ContextBuilder::new()
+            .info_name(cmd_name)
+            .parent(Arc::clone(self));
+
+        // If the parent has an obj, it will be inherited via ContextBuilder.
+        // Build the child context
+        let mut child_ctx = child_builder.build();
+
+        // Copy all parameters from this context to the child
+        for (key, value) in self.params.iter() {
+            child_ctx.params.insert(key.clone(), Arc::clone(value));
+        }
+
+        // Copy parameter sources
+        for (key, source) in self.parameter_source.iter() {
+            child_ctx.parameter_source.insert(key.clone(), *source);
+        }
+
+        let child_ctx = Arc::new(child_ctx);
+
+        // Push child context onto thread-local stack
+        push_context(Arc::clone(&child_ctx));
+
+        // Invoke the command
+        let result = cmd.invoke(&child_ctx);
+
+        // Pop context
+        pop_context();
+
+        // Run close callbacks on child
+        child_ctx.close();
+
+        result
+    }
+
+    /// Execute a function with a resource, ensuring cleanup on close.
+    ///
+    /// This is a convenience method that combines resource registration with
+    /// immediate use. The resource is passed to the provided function, and
+    /// a cleanup callback is registered via [`call_on_close`](Self::call_on_close).
+    ///
+    /// This pattern is useful for managing resources like file handles,
+    /// database connections, or other cleanup-requiring objects within
+    /// command execution.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `T` - The resource type (must be `Send + 'static`)
+    /// * `F` - The function to execute with the resource
+    /// * `C` - The cleanup function
+    /// * `R` - The return type of the function
+    ///
+    /// # Arguments
+    ///
+    /// * `resource` - The resource to manage
+    /// * `f` - The function to execute with the resource
+    /// * `cleanup` - The cleanup function to run when the context closes
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use click::context::ContextBuilder;
+    /// use std::sync::Arc;
+    /// use std::sync::atomic::{AtomicBool, Ordering};
+    ///
+    /// struct Resource {
+    ///     value: i32,
+    /// }
+    ///
+    /// let cleaned_up = Arc::new(AtomicBool::new(false));
+    /// let cleaned_up_clone = Arc::clone(&cleaned_up);
+    ///
+    /// let ctx = ContextBuilder::new().build();
+    ///
+    /// let result = ctx.with_resource(
+    ///     Resource { value: 42 },
+    ///     |res| res.value * 2,
+    ///     move || {
+    ///         cleaned_up_clone.store(true, Ordering::SeqCst);
+    ///     },
+    /// );
+    ///
+    /// assert_eq!(result, 84);
+    /// assert!(!cleaned_up.load(Ordering::SeqCst)); // Not yet cleaned up
+    ///
+    /// ctx.close();
+    /// assert!(cleaned_up.load(Ordering::SeqCst)); // Now cleaned up
+    /// ```
+    pub fn with_resource<T, F, C, R>(&self, resource: T, f: F, cleanup: C) -> R
+    where
+        T: Send + 'static,
+        F: FnOnce(&T) -> R,
+        C: FnOnce() + Send + 'static,
+    {
+        // Register the cleanup callback
+        self.call_on_close(cleanup);
+
+        // Execute the function with the resource
+        f(&resource)
+    }
 }
 
 /// Builder for creating [`Context`] instances with custom settings.
@@ -1210,5 +1420,371 @@ mod tests {
 
         ctx.set_invoked_subcommand(None);
         assert!(ctx.invoked_subcommand().is_none());
+    }
+
+    // =========================================================================
+    // Tests for Context helper methods: invoke, forward, with_resource
+    // =========================================================================
+
+    #[test]
+    fn test_context_invoke_command() {
+        use crate::command::Command;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let invoked = Arc::new(AtomicBool::new(false));
+        let invoked_clone = Arc::clone(&invoked);
+
+        let other_cmd = Command::new("other")
+            .callback(move |_ctx| {
+                invoked_clone.store(true, Ordering::SeqCst);
+                Ok(())
+            })
+            .build();
+
+        let ctx = Arc::new(ContextBuilder::new().info_name("main").build());
+        let result = ctx.invoke(&other_cmd, &[]);
+
+        assert!(result.is_ok());
+        assert!(invoked.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_context_invoke_with_args() {
+        use crate::command::Command;
+        use crate::argument::Argument;
+        use std::sync::Mutex;
+
+        let captured_name = Arc::new(Mutex::new(String::new()));
+        let captured_clone = Arc::clone(&captured_name);
+
+        let other_cmd = Command::new("greet")
+            .argument(Argument::new("name").build())
+            .callback(move |ctx| {
+                if let Some(name) = ctx.get_param::<String>("name") {
+                    let mut lock = captured_clone.lock().unwrap();
+                    *lock = name.clone();
+                }
+                Ok(())
+            })
+            .build();
+
+        let ctx = Arc::new(ContextBuilder::new().info_name("main").build());
+        let result = ctx.invoke(&other_cmd, &["Alice".to_string()]);
+
+        assert!(result.is_ok());
+        let name = captured_name.lock().unwrap();
+        assert_eq!(*name, "Alice");
+    }
+
+    #[test]
+    fn test_context_invoke_creates_child_context() {
+        use crate::command::Command;
+        use std::sync::Mutex;
+
+        let parent_name = Arc::new(Mutex::new(None::<String>));
+        let parent_clone = Arc::clone(&parent_name);
+
+        let other_cmd = Command::new("child")
+            .callback(move |ctx| {
+                if let Some(parent) = ctx.parent() {
+                    let mut lock = parent_clone.lock().unwrap();
+                    *lock = parent.info_name().map(|s| s.to_string());
+                }
+                Ok(())
+            })
+            .build();
+
+        let ctx = Arc::new(ContextBuilder::new().info_name("main").build());
+        let result = ctx.invoke(&other_cmd, &[]);
+
+        assert!(result.is_ok());
+        let captured = parent_name.lock().unwrap();
+        assert_eq!(*captured, Some("main".to_string()));
+    }
+
+    #[test]
+    fn test_context_forward_copies_params() {
+        use crate::command::Command;
+        use std::sync::Mutex;
+
+        let forwarded_name = Arc::new(Mutex::new(None::<String>));
+        let forwarded_clone = Arc::clone(&forwarded_name);
+
+        let other_cmd = Command::new("receiver")
+            .callback(move |ctx| {
+                let mut lock = forwarded_clone.lock().unwrap();
+                *lock = ctx.get_param::<String>("name").cloned();
+                Ok(())
+            })
+            .build();
+
+        let mut ctx = ContextBuilder::new().info_name("sender").build();
+        ctx.params_mut().insert("name".to_string(), Arc::new("Forwarded".to_string()));
+        let ctx = Arc::new(ctx);
+
+        let result = ctx.forward(&other_cmd);
+
+        assert!(result.is_ok());
+        let captured = forwarded_name.lock().unwrap();
+        assert_eq!(*captured, Some("Forwarded".to_string()));
+    }
+
+    #[test]
+    fn test_context_forward_copies_multiple_params() {
+        use crate::command::Command;
+        use std::sync::Mutex;
+
+        let forwarded_params = Arc::new(Mutex::new((None::<String>, None::<i32>)));
+        let params_clone = Arc::clone(&forwarded_params);
+
+        let other_cmd = Command::new("receiver")
+            .callback(move |ctx| {
+                let mut lock = params_clone.lock().unwrap();
+                lock.0 = ctx.get_param::<String>("name").cloned();
+                lock.1 = ctx.get_param::<i32>("count").copied();
+                Ok(())
+            })
+            .build();
+
+        let mut ctx = ContextBuilder::new().info_name("sender").build();
+        ctx.params_mut().insert("name".to_string(), Arc::new("Test".to_string()));
+        ctx.params_mut().insert("count".to_string(), Arc::new(42i32));
+        let ctx = Arc::new(ctx);
+
+        let result = ctx.forward(&other_cmd);
+
+        assert!(result.is_ok());
+        let captured = forwarded_params.lock().unwrap();
+        assert_eq!(captured.0, Some("Test".to_string()));
+        assert_eq!(captured.1, Some(42));
+    }
+
+    #[test]
+    fn test_context_forward_copies_parameter_sources() {
+        use crate::command::Command;
+        use std::sync::Mutex;
+
+        let forwarded_source = Arc::new(Mutex::new(None::<ParameterSource>));
+        let source_clone = Arc::clone(&forwarded_source);
+
+        let other_cmd = Command::new("receiver")
+            .callback(move |ctx| {
+                let mut lock = source_clone.lock().unwrap();
+                *lock = ctx.get_parameter_source("name");
+                Ok(())
+            })
+            .build();
+
+        let mut ctx = ContextBuilder::new().info_name("sender").build();
+        ctx.params_mut().insert("name".to_string(), Arc::new("Test".to_string()));
+        ctx.set_parameter_source("name", ParameterSource::CommandLine);
+        let ctx = Arc::new(ctx);
+
+        let result = ctx.forward(&other_cmd);
+
+        assert!(result.is_ok());
+        let captured = forwarded_source.lock().unwrap();
+        assert_eq!(*captured, Some(ParameterSource::CommandLine));
+    }
+
+    #[test]
+    fn test_context_forward_creates_child_context() {
+        use crate::command::Command;
+        use std::sync::Mutex;
+
+        let parent_name = Arc::new(Mutex::new(None::<String>));
+        let parent_clone = Arc::clone(&parent_name);
+
+        let other_cmd = Command::new("receiver")
+            .callback(move |ctx| {
+                if let Some(parent) = ctx.parent() {
+                    let mut lock = parent_clone.lock().unwrap();
+                    *lock = parent.info_name().map(|s| s.to_string());
+                }
+                Ok(())
+            })
+            .build();
+
+        let ctx = Arc::new(ContextBuilder::new().info_name("sender").build());
+        let result = ctx.forward(&other_cmd);
+
+        assert!(result.is_ok());
+        let captured = parent_name.lock().unwrap();
+        assert_eq!(*captured, Some("sender".to_string()));
+    }
+
+    #[test]
+    fn test_with_resource_basic() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct Resource {
+            value: i32,
+        }
+
+        let cleaned_up = Arc::new(AtomicBool::new(false));
+        let cleaned_up_clone = Arc::clone(&cleaned_up);
+
+        let ctx = ContextBuilder::new().build();
+
+        let result = ctx.with_resource(
+            Resource { value: 42 },
+            |res| res.value * 2,
+            move || {
+                cleaned_up_clone.store(true, Ordering::SeqCst);
+            },
+        );
+
+        assert_eq!(result, 84);
+        assert!(!cleaned_up.load(Ordering::SeqCst)); // Not yet cleaned up
+
+        ctx.close();
+        assert!(cleaned_up.load(Ordering::SeqCst)); // Now cleaned up
+    }
+
+    #[test]
+    fn test_with_resource_multiple() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let cleanup_count = Arc::new(AtomicUsize::new(0));
+        let count1 = Arc::clone(&cleanup_count);
+        let count2 = Arc::clone(&cleanup_count);
+
+        let ctx = ContextBuilder::new().build();
+
+        let result1 = ctx.with_resource(
+            10,
+            |res| *res + 5,
+            move || {
+                count1.fetch_add(1, Ordering::SeqCst);
+            },
+        );
+
+        let result2 = ctx.with_resource(
+            20,
+            |res| *res * 2,
+            move || {
+                count2.fetch_add(1, Ordering::SeqCst);
+            },
+        );
+
+        assert_eq!(result1, 15);
+        assert_eq!(result2, 40);
+        assert_eq!(cleanup_count.load(Ordering::SeqCst), 0);
+
+        ctx.close();
+        assert_eq!(cleanup_count.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn test_with_resource_string_resource() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let cleaned_up = Arc::new(AtomicBool::new(false));
+        let cleaned_up_clone = Arc::clone(&cleaned_up);
+
+        let ctx = ContextBuilder::new().build();
+
+        let result = ctx.with_resource(
+            String::from("hello"),
+            |s| s.len(),
+            move || {
+                cleaned_up_clone.store(true, Ordering::SeqCst);
+            },
+        );
+
+        assert_eq!(result, 5);
+
+        ctx.close();
+        assert!(cleaned_up.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_invoke_error_propagation() {
+        use crate::command::Command;
+        use crate::error::ClickError;
+
+        let other_cmd = Command::new("failing")
+            .callback(|_ctx| {
+                Err(ClickError::usage("intentional failure"))
+            })
+            .build();
+
+        let ctx = Arc::new(ContextBuilder::new().info_name("main").build());
+        let result = ctx.invoke(&other_cmd, &[]);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ClickError::UsageError { .. }));
+    }
+
+    #[test]
+    fn test_forward_error_propagation() {
+        use crate::command::Command;
+        use crate::error::ClickError;
+
+        let other_cmd = Command::new("failing")
+            .callback(|_ctx| {
+                Err(ClickError::usage("intentional failure"))
+            })
+            .build();
+
+        let ctx = Arc::new(ContextBuilder::new().info_name("main").build());
+        let result = ctx.forward(&other_cmd);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ClickError::UsageError { .. }));
+    }
+
+    #[test]
+    fn test_invoke_runs_child_close_callbacks() {
+        use crate::command::Command;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let child_closed = Arc::new(AtomicBool::new(false));
+        let closed_clone = Arc::clone(&child_closed);
+
+        let other_cmd = Command::new("child")
+            .callback(move |ctx| {
+                let closed_clone = Arc::clone(&closed_clone);
+                ctx.call_on_close(move || {
+                    closed_clone.store(true, Ordering::SeqCst);
+                });
+                Ok(())
+            })
+            .build();
+
+        let ctx = Arc::new(ContextBuilder::new().info_name("main").build());
+        let result = ctx.invoke(&other_cmd, &[]);
+
+        assert!(result.is_ok());
+        // Child context should have been closed after invoke
+        assert!(child_closed.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_forward_runs_child_close_callbacks() {
+        use crate::command::Command;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let child_closed = Arc::new(AtomicBool::new(false));
+        let closed_clone = Arc::clone(&child_closed);
+
+        let other_cmd = Command::new("child")
+            .callback(move |ctx| {
+                let closed_clone = Arc::clone(&closed_clone);
+                ctx.call_on_close(move || {
+                    closed_clone.store(true, Ordering::SeqCst);
+                });
+                Ok(())
+            })
+            .build();
+
+        let ctx = Arc::new(ContextBuilder::new().info_name("main").build());
+        let result = ctx.forward(&other_cmd);
+
+        assert!(result.is_ok());
+        // Child context should have been closed after forward
+        assert!(child_closed.load(Ordering::SeqCst));
     }
 }

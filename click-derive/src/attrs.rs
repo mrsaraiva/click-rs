@@ -7,6 +7,249 @@ use syn::{
     Type,
 };
 
+// =============================================================================
+// Version Option Attributes
+// =============================================================================
+
+/// Parsed #[version_option(...)] attributes
+#[derive(Debug, Clone, Default)]
+pub struct VersionOptionAttr {
+    /// The version string. If None, uses env!("CARGO_PKG_VERSION")
+    pub version: Option<String>,
+    /// The option names (default: ["--version", "-V"])
+    #[allow(dead_code)]
+    pub names: Option<Vec<String>>,
+    /// The help text (default: "Show the version and exit.")
+    pub help: Option<String>,
+    /// The name of the program (default: inferred from command)
+    pub prog_name: Option<String>,
+    /// The message format (default: "%(prog)s, version %(version)s")
+    pub message: Option<String>,
+}
+
+impl VersionOptionAttr {
+    pub fn from_attrs(attrs: &[Attribute]) -> Result<Option<Self>> {
+        for attr in attrs {
+            if attr.path().is_ident("version_option") {
+                let mut result = VersionOptionAttr::default();
+
+                // Handle #[version_option] with no parameters
+                if matches!(attr.meta, Meta::Path(_)) {
+                    return Ok(Some(result));
+                }
+
+                attr.parse_nested_meta(|meta| {
+                    let ident = meta.path.get_ident().map(|i| i.to_string());
+
+                    match ident.as_deref() {
+                        Some("version") => {
+                            let _: Token![=] = meta.input.parse()?;
+                            let lit: LitStr = meta.input.parse()?;
+                            result.version = Some(lit.value());
+                        }
+                        Some("help") => {
+                            let _: Token![=] = meta.input.parse()?;
+                            let lit: LitStr = meta.input.parse()?;
+                            result.help = Some(lit.value());
+                        }
+                        Some("prog_name") => {
+                            let _: Token![=] = meta.input.parse()?;
+                            let lit: LitStr = meta.input.parse()?;
+                            result.prog_name = Some(lit.value());
+                        }
+                        Some("message") => {
+                            let _: Token![=] = meta.input.parse()?;
+                            let lit: LitStr = meta.input.parse()?;
+                            result.message = Some(lit.value());
+                        }
+                        _ => {
+                            return Err(meta.error(format!(
+                                "unknown version_option attribute: {:?}",
+                                ident
+                            )));
+                        }
+                    }
+
+                    Ok(())
+                })?;
+
+                return Ok(Some(result));
+            }
+        }
+        Ok(None)
+    }
+}
+
+// =============================================================================
+// Help Option Attributes
+// =============================================================================
+
+/// Parsed #[help_option(...)] attributes
+#[derive(Debug, Clone, Default)]
+pub struct HelpOptionAttr {
+    /// The option names (default: ["--help", "-h"])
+    #[allow(dead_code)]
+    pub names: Option<Vec<String>>,
+    /// The help text (default: "Show this message and exit.")
+    pub help: Option<String>,
+}
+
+impl HelpOptionAttr {
+    pub fn from_attrs(attrs: &[Attribute]) -> Result<Option<Self>> {
+        for attr in attrs {
+            if attr.path().is_ident("help_option") {
+                let mut result = HelpOptionAttr::default();
+
+                // Handle #[help_option] with no parameters
+                if matches!(attr.meta, Meta::Path(_)) {
+                    return Ok(Some(result));
+                }
+
+                attr.parse_nested_meta(|meta| {
+                    let ident = meta.path.get_ident().map(|i| i.to_string());
+
+                    match ident.as_deref() {
+                        Some("help") => {
+                            let _: Token![=] = meta.input.parse()?;
+                            let lit: LitStr = meta.input.parse()?;
+                            result.help = Some(lit.value());
+                        }
+                        _ => {
+                            return Err(meta.error(format!(
+                                "unknown help_option attribute: {:?}",
+                                ident
+                            )));
+                        }
+                    }
+
+                    Ok(())
+                })?;
+
+                return Ok(Some(result));
+            }
+        }
+        Ok(None)
+    }
+}
+
+// =============================================================================
+// Confirmation Option Attributes
+// =============================================================================
+
+/// Parsed #[confirmation_option(...)] attributes
+/// Adds a --yes/-y option for skipping confirmation prompts
+#[derive(Debug, Clone, Default)]
+pub struct ConfirmationOptionAttr {
+    /// The option names (default: ["--yes", "-y"])
+    #[allow(dead_code)]
+    pub names: Option<Vec<String>>,
+    /// The help text (default: "Confirm the action without prompting.")
+    pub help: Option<String>,
+}
+
+impl ConfirmationOptionAttr {
+    pub fn from_attrs(attrs: &[Attribute]) -> Result<Option<Self>> {
+        for attr in attrs {
+            if attr.path().is_ident("confirmation_option") {
+                let mut result = ConfirmationOptionAttr::default();
+
+                // Handle #[confirmation_option] with no parameters
+                if matches!(attr.meta, Meta::Path(_)) {
+                    return Ok(Some(result));
+                }
+
+                attr.parse_nested_meta(|meta| {
+                    let ident = meta.path.get_ident().map(|i| i.to_string());
+
+                    match ident.as_deref() {
+                        Some("help") => {
+                            let _: Token![=] = meta.input.parse()?;
+                            let lit: LitStr = meta.input.parse()?;
+                            result.help = Some(lit.value());
+                        }
+                        _ => {
+                            return Err(meta.error(format!(
+                                "unknown confirmation_option attribute: {:?}",
+                                ident
+                            )));
+                        }
+                    }
+
+                    Ok(())
+                })?;
+
+                return Ok(Some(result));
+            }
+        }
+        Ok(None)
+    }
+}
+
+// =============================================================================
+// Password Option Attributes
+// =============================================================================
+
+/// Parsed #[password_option(...)] attributes
+/// Adds a --password option with hidden input and optional confirmation
+#[derive(Debug, Clone, Default)]
+pub struct PasswordOptionAttr {
+    /// The option names (default: ["--password"])
+    #[allow(dead_code)]
+    pub names: Option<Vec<String>>,
+    /// Prompt text (default: "Password")
+    pub prompt: Option<String>,
+    /// Whether to ask for confirmation (default: false)
+    pub confirmation_prompt: bool,
+    /// The help text (default: "")
+    pub help: Option<String>,
+}
+
+impl PasswordOptionAttr {
+    pub fn from_attrs(attrs: &[Attribute]) -> Result<Option<Self>> {
+        for attr in attrs {
+            if attr.path().is_ident("password_option") {
+                let mut result = PasswordOptionAttr::default();
+
+                // Handle #[password_option] with no parameters
+                if matches!(attr.meta, Meta::Path(_)) {
+                    return Ok(Some(result));
+                }
+
+                attr.parse_nested_meta(|meta| {
+                    let ident = meta.path.get_ident().map(|i| i.to_string());
+
+                    match ident.as_deref() {
+                        Some("prompt") => {
+                            let _: Token![=] = meta.input.parse()?;
+                            let lit: LitStr = meta.input.parse()?;
+                            result.prompt = Some(lit.value());
+                        }
+                        Some("confirmation_prompt") => {
+                            result.confirmation_prompt = true;
+                        }
+                        Some("help") => {
+                            let _: Token![=] = meta.input.parse()?;
+                            let lit: LitStr = meta.input.parse()?;
+                            result.help = Some(lit.value());
+                        }
+                        _ => {
+                            return Err(meta.error(format!(
+                                "unknown password_option attribute: {:?}",
+                                ident
+                            )));
+                        }
+                    }
+
+                    Ok(())
+                })?;
+
+                return Ok(Some(result));
+            }
+        }
+        Ok(None)
+    }
+}
+
 /// Parsed #[command(...)] attributes
 #[derive(Debug, Default)]
 pub struct CommandAttr {
@@ -192,6 +435,10 @@ pub enum FieldAttr {
     Argument(ArgumentAttr),
     #[allow(dead_code)]
     Subcommand(SubcommandAttr),
+    /// Field marked with #[pass_context] - receives &Context in callback
+    PassContext,
+    /// Field marked with #[pass_obj] - receives ctx.obj::<T>() in callback
+    PassObj,
     #[allow(dead_code)]
     Skip,
 }
@@ -449,7 +696,8 @@ impl SubcommandAttr {
 }
 
 impl FieldAttr {
-    /// Parse field attributes to determine if it's an option, argument, or subcommand
+    /// Parse field attributes to determine if it's an option, argument, subcommand,
+    /// pass_context, or pass_obj
     pub fn from_attrs(attrs: &[Attribute]) -> Result<Option<Self>> {
         for attr in attrs {
             if attr.path().is_ident("option") {
@@ -460,6 +708,12 @@ impl FieldAttr {
             }
             if attr.path().is_ident("subcommand") {
                 return Ok(Some(FieldAttr::Subcommand(SubcommandAttr::from_attr(attr)?)));
+            }
+            if attr.path().is_ident("pass_context") {
+                return Ok(Some(FieldAttr::PassContext));
+            }
+            if attr.path().is_ident("pass_obj") {
+                return Ok(Some(FieldAttr::PassObj));
             }
         }
         Ok(None)
