@@ -79,11 +79,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Terminal width detection via `detect_terminal_width()`
     - `truncate_text()` and `split_into_lines()` utilities
   - 244 unit tests + 37 doc tests
+- **Phase 5: Terminal UI** (complete)
+  - `echo()` function for styled output with optional newline control
+  - `secho()` for styled echo with ANSI color/attribute support
+  - `style()` function for applying ANSI escape codes to text
+  - `Color` enum with 17 colors (black, red, green, yellow, blue, magenta, cyan, white, bright variants, reset)
+  - Text attributes: bold, dim, underline, overline, italic, blink, strikethrough, reverse
+  - `prompt()` for user input with type conversion and validation
+  - `confirm()` for yes/no prompts with abort support
+  - `getchar()` for single character input
+  - `pause()` to wait for user keypress
+  - `clear()` to clear terminal screen
+  - `ProgressBar` struct for CLI progress indicators
+    - Configurable width, label, fill/empty characters
+    - `update()` and `finish()` methods
+  - `get_terminal_size()` for terminal dimensions
+  - `isatty()` for TTY detection
+  - ANSI code stripping for non-terminal output
+  - 42 integration tests
+- **Phase 6: Shell Completion, Testing & Utilities** (complete)
+  - Shell completion system with `ShellComplete` trait
+  - `BashComplete`, `ZshComplete`, `FishComplete` implementations
+  - `shell_complete()` entry point for completion scripts
+  - `get_completions()` for programmatic completion generation
+  - Completion support for options, subcommands, and nested groups
+  - `CliRunner` for CLI application testing
+    - `invoke()`, `invoke_with_input()`, `invoke_isolated()` methods
+    - Environment variable overrides and clearing
+    - `InvokeResult` with exit code, output capture, and helper methods
+  - `IsolatedFilesystem` for temporary directory testing
+    - Automatic cleanup on drop
+    - File/directory creation and listing helpers
+  - Utility functions:
+    - `get_app_dir()` for application config directories
+    - `expand_path()` with tilde and environment variable expansion
+    - `format_filename()` for path shortening with tilde
+    - `get_text_stdout()`, `get_text_stderr()`, `get_binary_stdout()` for stream access
+    - `get_os_args()` for CLI arguments
+    - `safecall()` for exception-safe function calls
+    - `should_strip_ansi()` for ANSI output detection
+  - 302 unit tests + 239 integration/doc tests (541 total)
 
 ### Known Limitations (v1.0)
 - Mixed flag/value append ordering (`--opt --opt val`) may not preserve order
 - Repeated flag-as-optional (`--opt --opt`) collapses to single value in append mode
 - Environment variable reading in derive macros requires parser enhancement
+- `CliRunner` does not capture actual stdout/stderr (limitation of Rust's `println!`)
 
 ### Dependencies
 - `thiserror` 2.0 - Error type derivation
@@ -92,12 +133,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `syn` 2.0 - Rust AST parsing (click-derive)
 - `quote` 1.0 - Code generation (click-derive)
 - `proc-macro2` 1.0 - Procedural macro utilities (click-derive)
-
-### Planned (Phase 5)
-- Terminal UI: `echo()`, `prompt()`, `confirm()`, `progressbar()`
-- ANSI color and styling support
-
-### Planned (Phase 6)
-- Shell completion (Bash, Zsh, Fish)
-- `CliRunner` for testing
-- Utility functions

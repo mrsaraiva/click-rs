@@ -67,6 +67,7 @@
 
 pub mod argument;
 pub mod command;
+pub mod completion;
 pub mod context;
 pub mod error;
 pub mod formatting;
@@ -75,7 +76,10 @@ pub mod option;
 pub mod parameter;
 pub mod parser;
 mod source;
+pub mod termui;
+pub mod testing;
 pub mod types;
+pub mod utils;
 
 pub use argument::{Argument, ArgumentBuilder};
 pub use command::{Command, CommandBuilder, CommandCallback};
@@ -127,4 +131,24 @@ pub use types::{
     STRING,
     UNPROCESSED,
     UUID,
+};
+
+// Re-export terminal UI functions
+pub use termui::{
+    clear, confirm, echo, get_terminal_size, getchar, isatty, pause, prompt, secho, style, Color,
+    ProgressBar,
+};
+
+// Re-export shell completion
+pub use completion::{
+    shell_complete, BashComplete, FishComplete, ShellComplete, ZshComplete,
+};
+
+// Re-export testing utilities
+pub use testing::{CliRunner, InvokeResult, IsolatedFilesystem};
+
+// Re-export general utilities
+pub use utils::{
+    expand_path, format_filename, get_app_dir, get_binary_stdout, get_os_args, get_text_stderr,
+    get_text_stdout, safecall, should_strip_ansi,
 };
