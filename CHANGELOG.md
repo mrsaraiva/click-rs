@@ -57,20 +57,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Optional positional argument handling with lookahead for required args
   - `FlagNeedsValue` support for optional option values
   - 229 unit tests + 36 doc tests
+- **Phase 4: Derive Macros & Help Formatting** (complete)
+  - `click-derive` proc-macro crate for declarative CLI definition
+  - `#[derive(Command)]` macro for generating `Command` from structs
+    - `#[command(name, help, hidden, no_args_is_help)]` container attributes
+    - Automatic help text extraction from doc comments
+    - `command()` and `command_with_run()` methods generated
+    - `from_context()` for extracting typed values from Context
+  - `#[derive(Group)]` macro for generating `Group` from structs
+    - `#[group(name, chain, invoke_without_command)]` container attributes
+    - Same field attributes as Command
+  - Field attributes:
+    - `#[option(short, long, default, required, hidden, flag, count, multiple, envvar)]`
+    - `#[argument(required, hidden, multiple, default)]`
+    - `#[subcommand]` (structure defined, implementation pending)
+  - Rust type inference: `String`→STRING, `i32`→INT, `bool`→flag, `Vec<T>`→multiple, `Option<T>`→optional
+  - `HelpFormatter` struct for terminal-aware help output
+    - `write_usage()`, `write_heading()`, `write_paragraph()` methods
+    - `write_definition_list()` for options/arguments formatting
+    - Text wrapping with `wrap_text()` function
+    - Terminal width detection via `detect_terminal_width()`
+    - `truncate_text()` and `split_into_lines()` utilities
+  - 244 unit tests + 37 doc tests
 
 ### Known Limitations (v1.0)
 - Mixed flag/value append ordering (`--opt --opt val`) may not preserve order
 - Repeated flag-as-optional (`--opt --opt`) collapses to single value in append mode
+- Environment variable reading in derive macros requires parser enhancement
 
 ### Dependencies
 - `thiserror` 2.0 - Error type derivation
 - `uuid` 1.0 - UUID parsing
 - `chrono` 0.4 - DateTime parsing
-
-### Planned (Phase 4)
-- `click-derive` proc-macro crate
-- `#[derive(Command)]`, `#[derive(Group)]` macros
-- `HelpFormatter` for help text generation
+- `syn` 2.0 - Rust AST parsing (click-derive)
+- `quote` 1.0 - Code generation (click-derive)
+- `proc-macro2` 1.0 - Procedural macro utilities (click-derive)
 
 ### Planned (Phase 5)
 - Terminal UI: `echo()`, `prompt()`, `confirm()`, `progressbar()`

@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "click-derive"]
+
 [package]
 name = "click"
 version = "0.1.0"
@@ -13,6 +16,12 @@ categories = ["command-line-interface"]
 thiserror = "2.0"
 uuid = { version = "1.0", features = ["v4", "std"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
+click-derive = { path = "./click-derive", optional = true }
 
 [dev-dependencies]
 tempfile = "3.0"
+click-derive = { path = "./click-derive" }
+
+[features]
+default = ["derive"]
+derive = ["dep:click-derive"]

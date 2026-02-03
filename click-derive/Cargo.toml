@@ -1,0 +1,18 @@
+[package]
+name = "click-derive"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+description = "Derive macros for click-rs CLI library"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/msaraiva/click-rs"
+keywords = ["cli", "command-line", "derive", "macro"]
+categories = ["command-line-interface", "development-tools::procedural-macro-helpers"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2.0", features = ["full", "extra-traits"] }
+quote = "1.0"
+proc-macro2 = "1.0"
