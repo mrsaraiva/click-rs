@@ -1146,6 +1146,77 @@ pub fn getchar(echo_char: bool) -> Result<char> {
         }
     }
 
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{BOOL, HANDLE, INVALID_HANDLE_VALUE};
+        use windows_sys::Win32::System::Console::{
+            GetConsoleMode, GetStdHandle, ReadConsoleInputW, SetConsoleMode, INPUT_RECORD,
+            ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, KEY_EVENT, STD_INPUT_HANDLE,
+        };
+
+        let handle = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
+        if handle != 0 && handle != INVALID_HANDLE_VALUE {
+            let mut mode: u32 = 0;
+            unsafe {
+                if GetConsoleMode(handle, &mut mode) != 0 {
+                    let new_mode = mode & !(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT);
+                    if SetConsoleMode(handle, new_mode) != 0 {
+                        struct RestoreConsoleMode {
+                            handle: HANDLE,
+                            mode: u32,
+                        }
+
+                        impl Drop for RestoreConsoleMode {
+                            fn drop(&mut self) {
+                                unsafe {
+                                    let _ = SetConsoleMode(self.handle, self.mode);
+                                }
+                            }
+                        }
+
+                        let _restore = RestoreConsoleMode { handle, mode };
+
+                        loop {
+                            let mut rec = std::mem::MaybeUninit::<INPUT_RECORD>::uninit();
+                            let mut read: u32 = 0;
+                            let ok: BOOL =
+                                ReadConsoleInputW(handle, rec.as_mut_ptr(), 1, &mut read);
+                            if ok == 0 {
+                                break;
+                            }
+                            if read == 0 {
+                                continue;
+                            }
+
+                            let rec = rec.assume_init();
+                            if rec.EventType as u32 != KEY_EVENT {
+                                continue;
+                            }
+
+                            let key_event = rec.Event.KeyEvent;
+                            if key_event.bKeyDown == 0 {
+                                continue;
+                            }
+
+                            let u: u16 = key_event.uChar.UnicodeChar;
+                            if u == 0 {
+                                continue;
+                            }
+
+                            if let Some(c) = char::from_u32(u as u32) {
+                                if echo_char {
+                                    print!("{}", c);
+                                    let _ = io::stdout().flush();
+                                }
+                                return Ok(c);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Fallback: read a line and return the first character
     let input = read_line("")?;
     input.chars().next().ok_or(ClickError::Abort)
