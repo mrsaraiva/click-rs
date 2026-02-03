@@ -199,7 +199,18 @@ pub struct Group {
     pub command: Command,
 
     /// Registered subcommands (name -> Command or Group).
-    pub commands: HashMap<String, Box<dyn CommandLike>>,
+    pub commands: HashMap<String, Arc<dyn CommandLike>>,
+
+    /// Alias metadata for commands registered through the Group/GroupBuilder APIs.
+    ///
+    /// This tracks which registered names (keys in `commands`) point at the same underlying
+    /// command object, so callers can distinguish:
+    /// - canonical command name (`command.name()`)
+    /// - registered name (key in the parent group)
+    /// - other aliases (other keys mapping to the same command)
+    command_ids_by_name: HashMap<String, usize>,
+    command_aliases_by_id: HashMap<usize, Vec<String>>,
+    next_command_id: usize,
 
     /// Whether to execute multiple subcommands in sequence.
     pub chain: bool,
@@ -223,7 +234,10 @@ impl std::fmt::Debug for Group {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Group")
             .field("command", &self.command)
-            .field("commands", &format!("<{} subcommands>", self.commands.len()))
+            .field(
+                "commands",
+                &format!("<{} subcommands>", self.commands.len()),
+            )
             .field("chain", &self.chain)
             .field("invoke_without_command", &self.invoke_without_command)
             .field("subcommand_required", &self.subcommand_required)
@@ -237,6 +251,9 @@ impl Default for Group {
         Self {
             command: Command::default(),
             commands: HashMap::new(),
+            command_ids_by_name: HashMap::new(),
+            command_aliases_by_id: HashMap::new(),
+            next_command_id: 0,
             chain: false,
             invoke_without_command: false,
             result_callback: None,
@@ -287,8 +304,56 @@ impl Group {
             .or_else(|| cmd.name().map(|s| s.to_string()));
 
         if let Some(n) = cmd_name {
-            self.commands.insert(n, Box::new(cmd));
+            self.add_command_shared(Arc::new(cmd), Some(&n));
         }
+    }
+
+    /// Add a subcommand to this group using a shared command object.
+    ///
+    /// This makes it possible to register the same command under multiple names (aliases)
+    /// while still being able to query alias metadata.
+    pub fn add_command_shared(&mut self, cmd: Arc<dyn CommandLike>, name: Option<&str>) {
+        let cmd_name = name
+            .map(|s| s.to_string())
+            .or_else(|| cmd.name().map(|s| s.to_string()));
+
+        let Some(name) = cmd_name else { return };
+
+        // If we're replacing an existing name, unlink it from prior alias metadata.
+        if let Some(old_id) = self.command_ids_by_name.get(&name).copied() {
+            if let Some(names) = self.command_aliases_by_id.get_mut(&old_id) {
+                names.retain(|n| n != &name);
+            }
+        }
+
+        // Find an existing id for this command (if it's already registered under another name).
+        let existing_id = self.commands.iter().find_map(|(n, existing)| {
+            if Arc::ptr_eq(existing, &cmd) {
+                self.command_ids_by_name.get(n).copied()
+            } else {
+                None
+            }
+        });
+
+        let id = existing_id.unwrap_or_else(|| {
+            let id = self.next_command_id;
+            self.next_command_id += 1;
+            id
+        });
+
+        self.command_ids_by_name.insert(name.clone(), id);
+        self.command_aliases_by_id
+            .entry(id)
+            .or_insert_with(Vec::new)
+            .push(name.clone());
+
+        // Keep alias lists deterministic.
+        if let Some(names) = self.command_aliases_by_id.get_mut(&id) {
+            names.sort();
+            names.dedup();
+        }
+
+        self.commands.insert(name, cmd);
     }
 
     /// Get a subcommand by name.
@@ -308,6 +373,44 @@ impl Group {
     /// ```
     pub fn get_command(&self, name: &str) -> Option<&dyn CommandLike> {
         self.commands.get(name).map(|c| c.as_ref())
+    }
+
+    /// List all command registrations as `(registered_name, command)` pairs.
+    ///
+    /// This is useful when you need both the registered key and the canonical name
+    /// stored inside the command itself (`command.name()`).
+    pub fn list_command_entries(&self) -> Vec<(String, &dyn CommandLike)> {
+        let mut names: Vec<&String> = self.commands.keys().collect();
+        names.sort();
+        names
+            .into_iter()
+            .filter_map(|name| {
+                self.commands
+                    .get(name)
+                    .map(|cmd| (name.clone(), cmd.as_ref()))
+            })
+            .collect()
+    }
+
+    /// List other registered names (aliases) that map to the same command.
+    ///
+    /// Returns an empty list if the command is not found or if it has no aliases.
+    pub fn list_command_aliases(&self, name: &str) -> Vec<String> {
+        let Some(id) = self.command_ids_by_name.get(name).copied() else {
+            return Vec::new();
+        };
+        let Some(names) = self.command_aliases_by_id.get(&id) else {
+            return Vec::new();
+        };
+
+        let mut out: Vec<String> = names
+            .iter()
+            .filter(|n| n.as_str() != name)
+            .cloned()
+            .collect();
+        out.sort();
+        out.dedup();
+        out
     }
 
     /// List all subcommand names (sorted alphabetically).
@@ -375,7 +478,10 @@ impl Group {
             return Ok(None);
         }
 
-        Err(ClickError::usage(format!("No such command '{}'.", cmd_name)))
+        Err(ClickError::usage(format!(
+            "No such command '{}'.",
+            cmd_name
+        )))
     }
 
     /// Format the commands section for help output.
@@ -411,7 +517,13 @@ impl Group {
         for (name, cmd) in visible_cmds {
             let help = cmd.get_short_help();
             let padding = max_width - name.len() + 2;
-            lines.push(format!("  {}{:padding$}{}", name, "", help, padding = padding));
+            lines.push(format!(
+                "  {}{:padding$}{}",
+                name,
+                "",
+                help,
+                padding = padding
+            ));
         }
 
         lines.join("\n")
@@ -526,16 +638,15 @@ impl CommandLike for Group {
         let args = ctx.args().to_vec();
 
         // Helper function to process results through result_callback
-        let process_result =
-            |result_callback: &Option<ResultCallback>,
-             ctx: &Context,
-             results: Vec<Box<dyn Any + Send + Sync>>|
-             -> Result<(), ClickError> {
-                if let Some(ref callback) = result_callback {
-                    callback(ctx, results)?;
-                }
-                Ok(())
-            };
+        let process_result = |result_callback: &Option<ResultCallback>,
+                              ctx: &Context,
+                              results: Vec<Box<dyn Any + Send + Sync>>|
+         -> Result<(), ClickError> {
+            if let Some(ref callback) = result_callback {
+                callback(ctx, results)?;
+            }
+            Ok(())
+        };
 
         // Get the parent context Arc from the thread-local stack for proper inheritance
         let parent_arc = get_current_context();
@@ -623,9 +734,13 @@ impl CommandLike for Group {
                         // We create the context with chain mode settings, overriding the command's defaults.
                         let mut sub_ctx = ContextBuilder::new()
                             .info_name(cmd_name)
-                            .allow_extra_args(true)  // Chain mode: allow extra args for next cmd
-                            .allow_interspersed_args(false)  // Chain mode: no interspersed
-                            .parent(parent_arc.clone().unwrap_or_else(|| Arc::new(Context::default())))
+                            .allow_extra_args(true) // Chain mode: allow extra args for next cmd
+                            .allow_interspersed_args(false) // Chain mode: no interspersed
+                            .parent(
+                                parent_arc
+                                    .clone()
+                                    .unwrap_or_else(|| Arc::new(Context::default())),
+                            )
                             .build();
 
                         // Parse args using the command (this populates the context)
@@ -633,7 +748,8 @@ impl CommandLike for Group {
                             command.parse_args(&mut sub_ctx, rest)?;
                         } else if let Some(group) = cmd.as_any().downcast_ref::<Group>() {
                             // For nested groups, use make_context which handles group-specific parsing
-                            let nested_ctx = group.make_context(cmd_name, rest, parent_arc.clone())?;
+                            let nested_ctx =
+                                group.make_context(cmd_name, rest, parent_arc.clone())?;
                             sub_ctx = nested_ctx;
                         } else {
                             // Fallback: use make_context (may error on extra args)
@@ -825,7 +941,10 @@ impl CommandCollection {
             return Ok(None);
         }
 
-        Err(ClickError::usage(format!("No such command '{}'.", cmd_name)))
+        Err(ClickError::usage(format!(
+            "No such command '{}'.",
+            cmd_name
+        )))
     }
 
     fn format_commands(&self, _ctx: &Context) -> String {
@@ -857,7 +976,13 @@ impl CommandCollection {
         for (name, cmd) in visible_cmds {
             let help = cmd.get_short_help();
             let padding = max_width - name.len() + 2;
-            lines.push(format!("  {}{:padding$}{}", name, "", help, padding = padding));
+            lines.push(format!(
+                "  {}{:padding$}{}",
+                name,
+                "",
+                help,
+                padding = padding
+            ));
         }
 
         lines.join("\n")
@@ -956,16 +1081,15 @@ impl CommandLike for CommandCollection {
     fn invoke(&self, ctx: &Context) -> Result<(), ClickError> {
         let args = ctx.args().to_vec();
 
-        let process_result =
-            |result_callback: &Option<ResultCallback>,
-             ctx: &Context,
-             results: Vec<Box<dyn Any + Send + Sync>>|
-             -> Result<(), ClickError> {
-                if let Some(ref callback) = result_callback {
-                    callback(ctx, results)?;
-                }
-                Ok(())
-            };
+        let process_result = |result_callback: &Option<ResultCallback>,
+                              ctx: &Context,
+                              results: Vec<Box<dyn Any + Send + Sync>>|
+         -> Result<(), ClickError> {
+            if let Some(ref callback) = result_callback {
+                callback(ctx, results)?;
+            }
+            Ok(())
+        };
 
         let parent_arc = get_current_context();
         let resolved = self.resolve_command(ctx, &args)?;
@@ -1075,12 +1199,11 @@ impl CommandLike for CommandCollection {
 
     #[allow(clippy::arc_with_non_send_sync)]
     fn main(&self, args: Vec<String>) -> Result<(), ClickError> {
-        let prog_name = self
-            .base
-            .command
-            .name
-            .clone()
-            .unwrap_or_else(|| std::env::args().next().unwrap_or_else(|| "program".to_string()));
+        let prog_name = self.base.command.name.clone().unwrap_or_else(|| {
+            std::env::args()
+                .next()
+                .unwrap_or_else(|| "program".to_string())
+        });
 
         let ctx = self.make_context(&prog_name, args, None)?;
         let ctx = Arc::new(ctx);
@@ -1184,7 +1307,10 @@ pub struct GroupBuilder {
     short_help: Option<String>,
     hidden: bool,
     deprecated: Option<String>,
-    commands: HashMap<String, Box<dyn CommandLike>>,
+    commands: HashMap<String, Arc<dyn CommandLike>>,
+    command_ids_by_name: HashMap<String, usize>,
+    command_aliases_by_id: HashMap<usize, Vec<String>>,
+    next_command_id: usize,
     chain: bool,
     invoke_without_command: bool,
     result_callback: Option<ResultCallback>,
@@ -1209,6 +1335,9 @@ impl GroupBuilder {
             hidden: false,
             deprecated: None,
             commands: HashMap::new(),
+            command_ids_by_name: HashMap::new(),
+            command_aliases_by_id: HashMap::new(),
+            next_command_id: 0,
             chain: false,
             invoke_without_command: false,
             result_callback: None,
@@ -1318,16 +1447,62 @@ impl GroupBuilder {
     ///     .command(Command::new("goodbye").build())
     ///     .build();
     /// ```
-    pub fn command(mut self, cmd: impl CommandLike + 'static) -> Self {
-        if let Some(name) = cmd.name() {
-            self.commands.insert(name.to_string(), Box::new(cmd));
+    pub fn command(self, cmd: impl CommandLike + 'static) -> Self {
+        self.command_shared(Arc::new(cmd))
+    }
+
+    /// Add a subcommand with a specific name (overriding the command's name).
+    pub fn command_with_name(self, name: &str, cmd: impl CommandLike + 'static) -> Self {
+        self.command_shared_with_name(name, Arc::new(cmd))
+    }
+
+    /// Add a shared subcommand to this group.
+    ///
+    /// This makes it possible to register a single command under multiple names (aliases).
+    pub fn command_shared(mut self, cmd: Arc<dyn CommandLike>) -> Self {
+        let name = cmd.name().map(|s| s.to_string());
+        if let Some(name) = name {
+            self = self.command_shared_with_name(&name, cmd);
         }
         self
     }
 
-    /// Add a subcommand with a specific name (overriding the command's name).
-    pub fn command_with_name(mut self, name: &str, cmd: impl CommandLike + 'static) -> Self {
-        self.commands.insert(name.to_string(), Box::new(cmd));
+    /// Add a shared subcommand with a specific registered name.
+    pub fn command_shared_with_name(mut self, name: &str, cmd: Arc<dyn CommandLike>) -> Self {
+        // If we're replacing an existing name, unlink it from prior alias metadata.
+        if let Some(old_id) = self.command_ids_by_name.get(name).copied() {
+            if let Some(names) = self.command_aliases_by_id.get_mut(&old_id) {
+                names.retain(|n| n != name);
+            }
+        }
+
+        // Find an existing id for this command (if it's already registered under another name).
+        let existing_id = self.commands.iter().find_map(|(n, existing)| {
+            if Arc::ptr_eq(existing, &cmd) {
+                self.command_ids_by_name.get(n).copied()
+            } else {
+                None
+            }
+        });
+
+        let id = existing_id.unwrap_or_else(|| {
+            let id = self.next_command_id;
+            self.next_command_id += 1;
+            id
+        });
+
+        self.command_ids_by_name.insert(name.to_string(), id);
+        self.command_aliases_by_id
+            .entry(id)
+            .or_insert_with(Vec::new)
+            .push(name.to_string());
+
+        if let Some(names) = self.command_aliases_by_id.get_mut(&id) {
+            names.sort();
+            names.dedup();
+        }
+
+        self.commands.insert(name.to_string(), cmd);
         self
     }
 
@@ -1338,7 +1513,8 @@ impl GroupBuilder {
     pub fn chain(mut self, chain: bool) -> Self {
         self.chain = chain;
         if chain {
-            self.subcommand_metavar = Some("COMMAND1 [ARGS]... [COMMAND2 [ARGS]...]...".to_string());
+            self.subcommand_metavar =
+                Some("COMMAND1 [ARGS]... [COMMAND2 [ARGS]...]...".to_string());
         }
         self
     }
@@ -1387,7 +1563,9 @@ impl GroupBuilder {
         let no_args_is_help = self.no_args_is_help.unwrap_or(!self.invoke_without_command);
 
         // Determine subcommand_required default
-        let subcommand_required = self.subcommand_required.unwrap_or(!self.invoke_without_command);
+        let subcommand_required = self
+            .subcommand_required
+            .unwrap_or(!self.invoke_without_command);
 
         // Determine subcommand_metavar
         let subcommand_metavar = self.subcommand_metavar.unwrap_or_else(|| {
@@ -1446,6 +1624,9 @@ impl GroupBuilder {
         Group {
             command,
             commands: self.commands,
+            command_ids_by_name: self.command_ids_by_name,
+            command_aliases_by_id: self.command_aliases_by_id,
+            next_command_id: self.next_command_id,
             chain: self.chain,
             invoke_without_command: self.invoke_without_command,
             result_callback: self.result_callback,
@@ -1509,6 +1690,35 @@ mod tests {
 
         assert!(group.get_command("renamed").is_some());
         assert!(group.get_command("original").is_none());
+    }
+
+    #[test]
+    fn test_alias_metadata_for_shared_command() {
+        let cmd: Arc<dyn CommandLike> = Arc::new(Command::new("original").build());
+
+        let group = Group::new("cli")
+            .command_shared(Arc::clone(&cmd))
+            .command_shared_with_name("alias", Arc::clone(&cmd))
+            .build();
+
+        assert!(group.get_command("original").is_some());
+        assert!(group.get_command("alias").is_some());
+
+        assert_eq!(
+            group.list_command_aliases("original"),
+            vec!["alias".to_string()]
+        );
+        assert_eq!(
+            group.list_command_aliases("alias"),
+            vec!["original".to_string()]
+        );
+
+        let entries = group.list_command_entries();
+        let alias_entry = entries
+            .iter()
+            .find(|(name, _)| name == "alias")
+            .expect("alias entry missing");
+        assert_eq!(alias_entry.1.name(), Some("original"));
     }
 
     #[test]
@@ -1727,9 +1937,7 @@ mod tests {
 
     #[test]
     fn test_missing_command_error() {
-        let group = Group::new("cli")
-            .subcommand_required(true)
-            .build();
+        let group = Group::new("cli").subcommand_required(true).build();
 
         let ctx = ContextBuilder::new().info_name("cli").build();
 
@@ -1757,11 +1965,7 @@ mod tests {
     #[test]
     fn test_group_usage() {
         let group = Group::new("cli")
-            .option(
-                ClickOption::new(&["--debug"])
-                    .flag("true")
-                    .build(),
-            )
+            .option(ClickOption::new(&["--debug"]).flag("true").build())
             .build();
 
         let ctx = ContextBuilder::new().info_name("cli").build();
@@ -1996,11 +2200,7 @@ mod tests {
         let callback_clone = Arc::clone(&result_callback_called);
 
         let group = Group::new("cli")
-            .command(
-                Command::new("sub")
-                    .callback(|_ctx| Ok(()))
-                    .build(),
-            )
+            .command(Command::new("sub").callback(|_ctx| Ok(())).build())
             .result_callback(move |_ctx, _results| {
                 callback_clone.store(true, Ordering::SeqCst);
                 Ok(())
