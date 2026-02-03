@@ -3,7 +3,7 @@
 use click::command::Command;
 use click::error::ClickError;
 use click::option::ClickOption;
-use click::testing::{CliRunner, InvokeResult, IsolatedFilesystem, make_test_context};
+use click::testing::{make_test_context, CliRunner, InvokeResult, IsolatedFilesystem};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -92,11 +92,7 @@ fn test_invoke_simple_command() {
 #[test]
 fn test_invoke_command_with_args() {
     let cmd = Command::new("greet")
-        .option(
-            ClickOption::new(&["--name"])
-                .default("World")
-                .build(),
-        )
+        .option(ClickOption::new(&["--name"]).default("World").build())
         .callback(|_ctx| Ok(()))
         .build();
 
@@ -171,6 +167,39 @@ fn test_invoke_isolated() {
     let result = runner.invoke_isolated(&cmd, &[]);
 
     assert_eq!(result.exit_code, 0);
+}
+
+#[test]
+fn test_invoke_catches_panics_when_enabled() {
+    let cmd = Command::new("panic")
+        .callback(|_ctx| {
+            println!("before");
+            panic!("boom");
+        })
+        .build();
+
+    let runner = CliRunner::new().catch_panics(true).mix_stderr(false);
+    let result = runner.invoke(&cmd, &[]);
+
+    assert_eq!(result.exit_code, 1);
+    assert!(result
+        .exception_message
+        .unwrap_or_default()
+        .contains("boom"));
+}
+
+#[test]
+#[should_panic]
+fn test_invoke_rethrows_panics_when_disabled() {
+    let cmd = Command::new("panic")
+        .callback(|_ctx| {
+            println!("before");
+            panic!("boom");
+        })
+        .build();
+
+    let runner = CliRunner::new().catch_panics(false);
+    let _ = runner.invoke(&cmd, &[]);
 }
 
 // =============================================================================
@@ -446,11 +475,7 @@ fn test_callback_receives_params() {
     let received_name_clone = Arc::clone(&received_name);
 
     let cmd = Command::new("test")
-        .option(
-            ClickOption::new(&["--name"])
-                .default("default")
-                .build(),
-        )
+        .option(ClickOption::new(&["--name"]).default("default").build())
         .callback(move |ctx| {
             if let Some(name) = ctx.get_param::<String>("name") {
                 *received_name_clone.lock().unwrap() = name.clone();

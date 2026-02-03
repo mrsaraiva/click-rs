@@ -240,82 +240,14 @@ pub const RESET: Color = Color::Reset;
 ///
 /// # Note
 ///
-/// This implementation uses environment variable heuristics for portability.
-/// For more accurate detection, consider using the `atty` or `is-terminal` crate.
+/// This uses `std::io::IsTerminal` when available (MSRV: 1.70).
 pub fn isatty(stream: &str) -> bool {
-    // Check for common CI/non-interactive environment variables
-    if std::env::var("CI").is_ok() || std::env::var("GITHUB_ACTIONS").is_ok() {
-        return false;
-    }
-
-    // Check for explicit TERM settings
-    if let Ok(term) = std::env::var("TERM") {
-        if term == "dumb" {
-            return false;
-        }
-        // If TERM is set to something reasonable, likely a TTY
-        if !term.is_empty() {
-            return true;
-        }
-    }
-
-    // Check for common terminal programs
-    if std::env::var("TERM_PROGRAM").is_ok() {
-        return true;
-    }
-
-    // Check for TTY-related environment
-    if std::env::var("TTY").is_ok() || std::env::var("SSH_TTY").is_ok() {
-        return true;
-    }
-
-    // Platform-specific checks
-    #[cfg(unix)]
-    {
-        use std::os::unix::io::AsRawFd;
-
-        // Use the isatty syscall wrapper
-        extern "C" {
-            fn isatty(fd: std::os::raw::c_int) -> std::os::raw::c_int;
-        }
-
-        let fd = match stream {
-            "stdin" => std::io::stdin().as_raw_fd(),
-            "stdout" => std::io::stdout().as_raw_fd(),
-            "stderr" => std::io::stderr().as_raw_fd(),
-            _ => return false,
-        };
-
-        unsafe { isatty(fd) != 0 }
-    }
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::io::AsRawHandle;
-
-        #[link(name = "kernel32")]
-        extern "system" {
-            fn GetConsoleMode(
-                hConsoleHandle: *mut std::ffi::c_void,
-                lpMode: *mut u32,
-            ) -> std::os::raw::c_int;
-        }
-
-        let handle = match stream {
-            "stdin" => std::io::stdin().as_raw_handle(),
-            "stdout" => std::io::stdout().as_raw_handle(),
-            "stderr" => std::io::stderr().as_raw_handle(),
-            _ => return false,
-        };
-
-        let mut mode: u32 = 0;
-        unsafe { GetConsoleMode(handle as *mut _, &mut mode) != 0 }
-    }
-
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = stream;
-        false
+    use std::io::IsTerminal;
+    match stream {
+        "stdin" => std::io::stdin().is_terminal(),
+        "stdout" => std::io::stdout().is_terminal(),
+        "stderr" => std::io::stderr().is_terminal(),
+        _ => false,
     }
 }
 

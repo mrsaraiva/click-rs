@@ -42,6 +42,31 @@ use std::os::unix::io::{FromRawFd, RawFd};
 
 use crate::group::CommandLike;
 
+#[derive(Debug)]
+enum CaptureOutcome {
+    Returned(Result<(), crate::ClickError>),
+    Panicked(Box<dyn std::any::Any + Send + 'static>),
+}
+
+fn panic_message(panic: &(dyn std::any::Any + Send + 'static)) -> String {
+    if let Some(s) = panic.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = panic.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "panic".to_string()
+    }
+}
+
+fn restore_env(saved_env: &[(String, Option<String>)]) {
+    for (key, value) in saved_env {
+        match value {
+            Some(v) => env::set_var(key, v),
+            None => env::remove_var(key),
+        }
+    }
+}
+
 #[cfg(unix)]
 fn pipe() -> io::Result<(RawFd, RawFd)> {
     let mut fds = [0; 2];
@@ -94,10 +119,7 @@ fn capture_lock() -> std::sync::MutexGuard<'static, ()> {
 }
 
 #[cfg(unix)]
-fn run_with_capture<F>(
-    input: &str,
-    f: F,
-) -> io::Result<(Result<(), crate::ClickError>, Vec<u8>, Vec<u8>)>
+fn run_with_capture<F>(input: &str, f: F) -> io::Result<(CaptureOutcome, Vec<u8>, Vec<u8>)>
 where
     F: FnOnce() -> Result<(), crate::ClickError>,
 {
@@ -161,7 +183,10 @@ where
         buf
     });
 
+    let old_panic_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
     let unwind = catch_unwind(AssertUnwindSafe(f));
+    std::panic::set_hook(old_panic_hook);
 
     let _ = io::stdout().flush();
     let _ = io::stderr().flush();
@@ -177,19 +202,16 @@ where
     let stdout_bytes = out_reader.join().unwrap_or_default();
     let stderr_bytes = err_reader.join().unwrap_or_default();
 
-    let result = match unwind {
-        Ok(r) => r,
-        Err(panic) => std::panic::resume_unwind(panic),
+    let outcome = match unwind {
+        Ok(r) => CaptureOutcome::Returned(r),
+        Err(panic) => CaptureOutcome::Panicked(panic),
     };
 
-    Ok((result, stdout_bytes, stderr_bytes))
+    Ok((outcome, stdout_bytes, stderr_bytes))
 }
 
 #[cfg(windows)]
-fn run_with_capture<F>(
-    input: &str,
-    f: F,
-) -> io::Result<(Result<(), crate::ClickError>, Vec<u8>, Vec<u8>)>
+fn run_with_capture<F>(input: &str, f: F) -> io::Result<(CaptureOutcome, Vec<u8>, Vec<u8>)>
 where
     F: FnOnce() -> Result<(), crate::ClickError>,
 {
@@ -286,7 +308,10 @@ where
         buf
     });
 
+    let old_panic_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
     let unwind = catch_unwind(AssertUnwindSafe(f));
+    std::panic::set_hook(old_panic_hook);
 
     let _ = io::stdout().flush();
     let _ = io::stderr().flush();
@@ -305,23 +330,25 @@ where
     let stdout_bytes = out_reader.join().unwrap_or_default();
     let stderr_bytes = err_reader.join().unwrap_or_default();
 
-    let result = match unwind {
-        Ok(r) => r,
-        Err(panic) => std::panic::resume_unwind(panic),
+    let outcome = match unwind {
+        Ok(r) => CaptureOutcome::Returned(r),
+        Err(panic) => CaptureOutcome::Panicked(panic),
     };
 
-    Ok((result, stdout_bytes, stderr_bytes))
+    Ok((outcome, stdout_bytes, stderr_bytes))
 }
 
 #[cfg(not(any(unix, windows)))]
-fn run_with_capture<F>(
-    _input: &str,
-    f: F,
-) -> io::Result<(Result<(), crate::ClickError>, Vec<u8>, Vec<u8>)>
+fn run_with_capture<F>(_input: &str, f: F) -> io::Result<(CaptureOutcome, Vec<u8>, Vec<u8>)>
 where
     F: FnOnce() -> Result<(), crate::ClickError>,
 {
-    Ok((f(), Vec::new(), Vec::new()))
+    let unwind = catch_unwind(AssertUnwindSafe(f));
+    let outcome = match unwind {
+        Ok(r) => CaptureOutcome::Returned(r),
+        Err(panic) => CaptureOutcome::Panicked(panic),
+    };
+    Ok((outcome, Vec::new(), Vec::new()))
 }
 
 // =============================================================================
@@ -367,6 +394,12 @@ pub struct CliRunner {
     /// Whether to mix stderr into stdout.
     mix_stderr: bool,
 
+    /// Whether to capture panics as a failure instead of re-panicking.
+    ///
+    /// When enabled (default), panics inside the invoked command are caught and returned as
+    /// `InvokeResult { exit_code: 1, exception_message: Some(...) }`.
+    catch_panics: bool,
+
     /// Character encoding for output (default: UTF-8).
     charset: String,
 }
@@ -387,6 +420,7 @@ impl CliRunner {
             env_unset: Vec::new(),
             echo_stdin: false,
             mix_stderr: true,
+            catch_panics: true,
             charset: "utf-8".to_string(),
         }
     }
@@ -431,6 +465,12 @@ impl CliRunner {
     /// The `InvokeResult.stderr` field is always populated with captured stderr.
     pub fn mix_stderr(mut self, mix: bool) -> Self {
         self.mix_stderr = mix;
+        self
+    }
+
+    /// Set whether panics should be captured as a failure instead of re-panicking.
+    pub fn catch_panics(mut self, catch: bool) -> Self {
+        self.catch_panics = catch;
         self
     }
 
@@ -509,24 +549,37 @@ impl CliRunner {
         // Always provide a stdin stream (empty by default) to avoid hanging on interactive reads.
         let input_str = input.unwrap_or("");
 
-        let (result, stdout_bytes, stderr_bytes) =
-            match run_with_capture(input_str, || cmd.main(args_owned)) {
-                Ok(v) => v,
-                Err(e) => {
-                    for (key, value) in saved_env {
-                        match value {
-                            Some(v) => env::set_var(&key, v),
-                            None => env::remove_var(&key),
-                        }
-                    }
-                    return InvokeResult::new(1, String::new(), String::new(), Some(e.to_string()));
+        let (outcome, stdout_bytes, stderr_bytes) = match run_with_capture(input_str, || {
+            // Run in a child thread so Rust's test harness output capture (thread-local) doesn't
+            // intercept stdout/stderr before our OS-level redirection does.
+            thread::scope(|s| {
+                let handle = s.spawn(|| cmd.main(args_owned));
+                match handle.join() {
+                    Ok(r) => r,
+                    Err(panic) => std::panic::resume_unwind(panic),
                 }
-            };
+            })
+        }) {
+            Ok(v) => v,
+            Err(e) => {
+                restore_env(&saved_env);
+                return InvokeResult::new(1, String::new(), String::new(), Some(e.to_string()));
+            }
+        };
 
         // Determine exit code and exception message
-        let (exit_code, exception_message) = match &result {
-            Ok(()) => (0, None),
-            Err(e) => (e.exit_code(), Some(e.to_string())),
+        let (exit_code, exception_message) = match outcome {
+            CaptureOutcome::Returned(r) => match &r {
+                Ok(()) => (0, None),
+                Err(e) => (e.exit_code(), Some(e.to_string())),
+            },
+            CaptureOutcome::Panicked(panic) => {
+                if !self.catch_panics {
+                    restore_env(&saved_env);
+                    std::panic::resume_unwind(panic);
+                }
+                (1, Some(format!("panic: {}", panic_message(&*panic))))
+            }
         };
 
         let mut stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
@@ -544,12 +597,7 @@ impl CliRunner {
         };
 
         // Restore environment
-        for (key, value) in saved_env {
-            match value {
-                Some(v) => env::set_var(&key, v),
-                None => env::remove_var(&key),
-            }
-        }
+        restore_env(&saved_env);
 
         InvokeResult::new(exit_code, output, stderr, exception_message)
     }
