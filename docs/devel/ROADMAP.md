@@ -487,6 +487,8 @@ behavior/API gaps beyond the Phase 1–6 parity suite coverage.
 | Todo | `make_pass_decorator(ensure=...)` decision | Requires `Context` interior mutability or an alternative API |
 | Todo | Public API stabilization | Audit re-exports + builder surface for 1.0 |
 
+**Gap tracking:** See `docs/devel/GAP_INVENTORY.md` for the active list of cross-platform and behavior differences vs Click 8.3.1.
+
 ---
 
 ## Quick Reference: Python → Rust Patterns

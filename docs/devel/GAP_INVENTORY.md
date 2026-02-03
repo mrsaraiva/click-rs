@@ -21,7 +21,7 @@ and every unintentional divergence should be turned into a tracked task.
 
 | ID | Area | Gap | Impact | Status | Notes / Next Steps |
 |----|------|-----|--------|--------|--------------------|
-| GAP-TERMUI-001 | Terminal input | Hidden input (password prompts) is Unix-only; Windows falls back to visible input. | High (security/UX) | Open | Implement Win32 console mode toggling (`ENABLE_ECHO_INPUT`) for `read_hidden_input`. |
+| GAP-TERMUI-001 | Terminal input | Hidden input (password prompts) is Unix-only; Windows falls back to visible input. | High (security/UX) | Done | Implemented Win32 console mode toggling (`ENABLE_ECHO_INPUT`) in `read_hidden_input` with fallback for non-console stdin. |
 | GAP-TERMUI-002 | Terminal input | `getchar()` “raw” keypress is Unix-only; Windows requires Enter (line fallback). | Medium (UX) | Open | Implement `ReadConsoleInputW` / `ReadFile` on console handle path. |
 | GAP-TERMUI-003 | TTY detection | `isatty()` uses a mix of env heuristics + platform calls; may mis-detect in some environments. | Medium | Open | Consider switching to a dedicated crate (`is-terminal`) and keep env checks as a fast-path. |
 | GAP-RUNNER-001 | Testing (`CliRunner`) | Capture is global-process state; concurrent `CliRunner::invoke*` calls are serialized via a global lock. | Medium | By Design | This matches the reality of redirecting process stdio; document as a contract for tests. |
@@ -36,4 +36,3 @@ and every unintentional divergence should be turned into a tracked task.
 1. Add a new row with a unique `GAP-<AREA>-NNN` ID.
 2. Include a minimal reproduction if possible (test name or parity phase/module).
 3. If it’s intentional, mark **By Design** and write a short rationale in the Notes column.
-

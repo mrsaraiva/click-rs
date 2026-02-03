@@ -1251,6 +1251,47 @@ fn read_hidden_input(prompt: &str) -> Result<String> {
         }
     }
 
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
+        use windows_sys::Win32::System::Console::{
+            GetConsoleMode, GetStdHandle, SetConsoleMode, ENABLE_ECHO_INPUT, STD_INPUT_HANDLE,
+        };
+
+        let handle = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
+        if handle != 0 && handle != INVALID_HANDLE_VALUE {
+            let mut mode: u32 = 0;
+            unsafe {
+                if GetConsoleMode(handle, &mut mode) != 0 {
+                    let new_mode = mode & !ENABLE_ECHO_INPUT;
+                    if SetConsoleMode(handle, new_mode) != 0 {
+                        struct RestoreConsoleMode {
+                            handle: HANDLE,
+                            mode: u32,
+                        }
+
+                        impl Drop for RestoreConsoleMode {
+                            fn drop(&mut self) {
+                                unsafe {
+                                    let _ = SetConsoleMode(self.handle, self.mode);
+                                }
+                            }
+                        }
+
+                        let _restore = RestoreConsoleMode { handle, mode };
+
+                        let result = read_line("");
+
+                        // Print newline since echo was disabled
+                        println!();
+
+                        return result;
+                    }
+                }
+            }
+        }
+    }
+
     // Fallback: warn user and read normally
     echo("(Warning: Input will be visible)", true, true, None);
     read_line("")
