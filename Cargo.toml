@@ -36,3 +36,43 @@ click-derive = { path = "./click-derive" }
 [features]
 default = ["derive"]
 derive = ["dep:click-derive"]
+
+[[example]]
+name = "inout"
+path = "examples/inout.rs"
+
+[[example]]
+name = "colors"
+path = "examples/colors.rs"
+
+[[example]]
+name = "validation"
+path = "examples/validation.rs"
+
+[[example]]
+name = "completion"
+path = "examples/completion.rs"
+
+[[example]]
+name = "naval"
+path = "examples/naval.rs"
+
+[[example]]
+name = "complex"
+path = "examples/complex.rs"
+
+[[example]]
+name = "aliases"
+path = "examples/aliases.rs"
+
+[[example]]
+name = "repo"
+path = "examples/repo.rs"
+
+[[example]]
+name = "termui"
+path = "examples/termui.rs"
+
+[[example]]
+name = "imagepipe"
+path = "examples/imagepipe.rs"
