@@ -32,6 +32,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::{self, Read, Write};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
@@ -81,15 +82,246 @@ fn close_fd(fd: RawFd) {
 /// Output capture redirects process-global file descriptors, which is not safe
 /// to do concurrently from multiple threads. The lock prevents tests (and other
 /// concurrent invocations) from corrupting each other's stdio streams.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 static IO_CAPTURE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn capture_lock() -> std::sync::MutexGuard<'static, ()> {
     IO_CAPTURE_LOCK
         .get_or_init(|| Mutex::new(()))
         .lock()
         .expect("IO capture lock poisoned")
+}
+
+#[cfg(unix)]
+fn run_with_capture<F>(
+    input: &str,
+    f: F,
+) -> io::Result<(Result<(), crate::ClickError>, Vec<u8>, Vec<u8>)>
+where
+    F: FnOnce() -> Result<(), crate::ClickError>,
+{
+    let _lock = capture_lock();
+
+    // Pipes for stdout/stderr capture.
+    let (out_r, out_w) = pipe()?;
+    let (err_r, err_w) = pipe()?;
+
+    // Pipe for stdin (write input, then close write end to send EOF).
+    let (in_r, in_w) = pipe()?;
+
+    // Save original fds.
+    let saved_stdin = dup_fd(0)?;
+    let saved_stdout = dup_fd(1)?;
+    let saved_stderr = dup_fd(2)?;
+
+    // Write input then close stdin write end.
+    {
+        let mut file = unsafe { fs::File::from_raw_fd(in_w) };
+        let _ = file.write_all(input.as_bytes());
+    }
+
+    // Redirect stdio. From this point on, we must restore on all exit paths.
+    let redir_ok = dup2_fd(in_r, 0)
+        .and_then(|_| dup2_fd(out_w, 1))
+        .and_then(|_| dup2_fd(err_w, 2))
+        .is_ok();
+
+    // Close unused ends in this thread; fd 0/1/2 now point at redirected targets.
+    close_fd(in_r);
+    close_fd(out_w);
+    close_fd(err_w);
+
+    if !redir_ok {
+        // Restore stdio.
+        let _ = dup2_fd(saved_stdin, 0);
+        let _ = dup2_fd(saved_stdout, 1);
+        let _ = dup2_fd(saved_stderr, 2);
+        close_fd(saved_stdin);
+        close_fd(saved_stdout);
+        close_fd(saved_stderr);
+
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            "failed to redirect stdio",
+        ));
+    }
+
+    // Reader threads (start before running command to avoid pipe buffer deadlocks).
+    let out_reader = thread::spawn(move || {
+        let mut buf = Vec::new();
+        let mut file = unsafe { fs::File::from_raw_fd(out_r) };
+        let _ = file.read_to_end(&mut buf);
+        buf
+    });
+    let err_reader = thread::spawn(move || {
+        let mut buf = Vec::new();
+        let mut file = unsafe { fs::File::from_raw_fd(err_r) };
+        let _ = file.read_to_end(&mut buf);
+        buf
+    });
+
+    let unwind = catch_unwind(AssertUnwindSafe(f));
+
+    let _ = io::stdout().flush();
+    let _ = io::stderr().flush();
+
+    // Restore stdio.
+    let _ = dup2_fd(saved_stdin, 0);
+    let _ = dup2_fd(saved_stdout, 1);
+    let _ = dup2_fd(saved_stderr, 2);
+    close_fd(saved_stdin);
+    close_fd(saved_stdout);
+    close_fd(saved_stderr);
+
+    let stdout_bytes = out_reader.join().unwrap_or_default();
+    let stderr_bytes = err_reader.join().unwrap_or_default();
+
+    let result = match unwind {
+        Ok(r) => r,
+        Err(panic) => std::panic::resume_unwind(panic),
+    };
+
+    Ok((result, stdout_bytes, stderr_bytes))
+}
+
+#[cfg(windows)]
+fn run_with_capture<F>(
+    input: &str,
+    f: F,
+) -> io::Result<(Result<(), crate::ClickError>, Vec<u8>, Vec<u8>)>
+where
+    F: FnOnce() -> Result<(), crate::ClickError>,
+{
+    use std::os::windows::io::FromRawHandle;
+    use std::ptr::null_mut;
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, SetHandleInformation, HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE,
+    };
+    use windows_sys::Win32::System::Console::{
+        GetStdHandle, SetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    };
+    use windows_sys::Win32::System::Pipes::CreatePipe;
+
+    let _lock = capture_lock();
+
+    unsafe fn create_pipe_pair() -> io::Result<(HANDLE, HANDLE)> {
+        let mut read_handle: HANDLE = 0;
+        let mut write_handle: HANDLE = 0;
+
+        if CreatePipe(&mut read_handle, &mut write_handle, null_mut(), 0) == 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        // Make the read handle non-inheritable.
+        let _ = SetHandleInformation(read_handle, HANDLE_FLAG_INHERIT, 0);
+
+        Ok((read_handle, write_handle))
+    }
+
+    let (out_r, out_w) = unsafe { create_pipe_pair()? };
+    let (err_r, err_w) = unsafe { create_pipe_pair()? };
+    let (in_r, in_w) = unsafe { create_pipe_pair()? };
+
+    let saved_in = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
+    let saved_out = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+    let saved_err = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
+
+    if saved_in == 0
+        || saved_out == 0
+        || saved_err == 0
+        || saved_in == INVALID_HANDLE_VALUE
+        || saved_out == INVALID_HANDLE_VALUE
+        || saved_err == INVALID_HANDLE_VALUE
+    {
+        unsafe {
+            CloseHandle(out_r);
+            CloseHandle(out_w);
+            CloseHandle(err_r);
+            CloseHandle(err_w);
+            CloseHandle(in_r);
+            CloseHandle(in_w);
+        }
+        return Err(io::Error::new(io::ErrorKind::Other, "GetStdHandle failed"));
+    }
+
+    // Write input then close stdin write end.
+    {
+        let mut file = unsafe { fs::File::from_raw_handle(in_w as *mut std::ffi::c_void) };
+        let _ = file.write_all(input.as_bytes());
+    }
+
+    // Redirect std handles. From this point on, we must restore on all exit paths.
+    let redir_ok = unsafe {
+        SetStdHandle(STD_INPUT_HANDLE, in_r) != 0
+            && SetStdHandle(STD_OUTPUT_HANDLE, out_w) != 0
+            && SetStdHandle(STD_ERROR_HANDLE, err_w) != 0
+    };
+
+    if !redir_ok {
+        unsafe {
+            let _ = SetStdHandle(STD_INPUT_HANDLE, saved_in);
+            let _ = SetStdHandle(STD_OUTPUT_HANDLE, saved_out);
+            let _ = SetStdHandle(STD_ERROR_HANDLE, saved_err);
+            CloseHandle(out_r);
+            CloseHandle(out_w);
+            CloseHandle(err_r);
+            CloseHandle(err_w);
+            CloseHandle(in_r);
+        }
+        return Err(io::Error::last_os_error());
+    }
+
+    // Reader threads (start before running command to avoid pipe buffer deadlocks).
+    let out_reader = thread::spawn(move || {
+        let mut buf = Vec::new();
+        let mut file = unsafe { fs::File::from_raw_handle(out_r as *mut std::ffi::c_void) };
+        let _ = file.read_to_end(&mut buf);
+        buf
+    });
+    let err_reader = thread::spawn(move || {
+        let mut buf = Vec::new();
+        let mut file = unsafe { fs::File::from_raw_handle(err_r as *mut std::ffi::c_void) };
+        let _ = file.read_to_end(&mut buf);
+        buf
+    });
+
+    let unwind = catch_unwind(AssertUnwindSafe(f));
+
+    let _ = io::stdout().flush();
+    let _ = io::stderr().flush();
+
+    unsafe {
+        let _ = SetStdHandle(STD_INPUT_HANDLE, saved_in);
+        let _ = SetStdHandle(STD_OUTPUT_HANDLE, saved_out);
+        let _ = SetStdHandle(STD_ERROR_HANDLE, saved_err);
+
+        // Close redirected handles to signal EOF to readers.
+        CloseHandle(out_w);
+        CloseHandle(err_w);
+        CloseHandle(in_r);
+    }
+
+    let stdout_bytes = out_reader.join().unwrap_or_default();
+    let stderr_bytes = err_reader.join().unwrap_or_default();
+
+    let result = match unwind {
+        Ok(r) => r,
+        Err(panic) => std::panic::resume_unwind(panic),
+    };
+
+    Ok((result, stdout_bytes, stderr_bytes))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn run_with_capture<F>(
+    _input: &str,
+    f: F,
+) -> io::Result<(Result<(), crate::ClickError>, Vec<u8>, Vec<u8>)>
+where
+    F: FnOnce() -> Result<(), crate::ClickError>,
+{
+    Ok((f(), Vec::new(), Vec::new()))
 }
 
 // =============================================================================
@@ -195,8 +427,8 @@ impl CliRunner {
 
     /// Set whether to mix stderr into stdout.
     ///
-    /// When true (default), stderr is captured together with stdout in the output field.
-    /// When false, stderr is captured separately in the stderr field.
+    /// When true (default), `InvokeResult.output` contains `stdout + stderr`.
+    /// The `InvokeResult.stderr` field is always populated with captured stderr.
     pub fn mix_stderr(mut self, mix: bool) -> Self {
         self.mix_stderr = mix;
         self
@@ -277,17 +509,10 @@ impl CliRunner {
         // Always provide a stdin stream (empty by default) to avoid hanging on interactive reads.
         let input_str = input.unwrap_or("");
 
-        // Run the command with captured output where possible.
-        #[cfg(unix)]
-        let (result, output_bytes, stderr_bytes) = {
-            let _lock = capture_lock();
-            let mix_stderr = self.mix_stderr;
-
-            // Pipes for stdout/stderr capture.
-            let (out_r, out_w) = match pipe() {
+        let (result, stdout_bytes, stderr_bytes) =
+            match run_with_capture(input_str, || cmd.main(args_owned)) {
                 Ok(v) => v,
                 Err(e) => {
-                    // Restore environment and return a synthetic failure result.
                     for (key, value) in saved_env {
                         match value {
                             Some(v) => env::set_var(&key, v),
@@ -297,187 +522,6 @@ impl CliRunner {
                     return InvokeResult::new(1, String::new(), String::new(), Some(e.to_string()));
                 }
             };
-            let (err_r, err_w) = match pipe() {
-                Ok(v) => v,
-                Err(e) => {
-                    close_fd(out_r);
-                    close_fd(out_w);
-                    for (key, value) in saved_env {
-                        match value {
-                            Some(v) => env::set_var(&key, v),
-                            None => env::remove_var(&key),
-                        }
-                    }
-                    return InvokeResult::new(1, String::new(), String::new(), Some(e.to_string()));
-                }
-            };
-
-            // Pipe for stdin (write input, then close write end to send EOF).
-            let (in_r, in_w) = match pipe() {
-                Ok(v) => v,
-                Err(e) => {
-                    close_fd(out_r);
-                    close_fd(out_w);
-                    close_fd(err_r);
-                    close_fd(err_w);
-                    for (key, value) in saved_env {
-                        match value {
-                            Some(v) => env::set_var(&key, v),
-                            None => env::remove_var(&key),
-                        }
-                    }
-                    return InvokeResult::new(1, String::new(), String::new(), Some(e.to_string()));
-                }
-            };
-
-            // Save original fds.
-            let saved_stdin = match dup_fd(0) {
-                Ok(fd) => fd,
-                Err(e) => {
-                    close_fd(out_w);
-                    close_fd(err_w);
-                    close_fd(in_r);
-                    close_fd(in_w);
-                    for (key, value) in saved_env {
-                        match value {
-                            Some(v) => env::set_var(&key, v),
-                            None => env::remove_var(&key),
-                        }
-                    }
-                    return InvokeResult::new(1, String::new(), String::new(), Some(e.to_string()));
-                }
-            };
-            let saved_stdout = match dup_fd(1) {
-                Ok(fd) => fd,
-                Err(e) => {
-                    close_fd(saved_stdin);
-                    close_fd(out_w);
-                    close_fd(err_w);
-                    close_fd(in_r);
-                    close_fd(in_w);
-                    for (key, value) in saved_env {
-                        match value {
-                            Some(v) => env::set_var(&key, v),
-                            None => env::remove_var(&key),
-                        }
-                    }
-                    return InvokeResult::new(1, String::new(), String::new(), Some(e.to_string()));
-                }
-            };
-            let saved_stderr = match dup_fd(2) {
-                Ok(fd) => fd,
-                Err(e) => {
-                    close_fd(saved_stdin);
-                    close_fd(saved_stdout);
-                    close_fd(out_w);
-                    close_fd(err_w);
-                    close_fd(in_r);
-                    close_fd(in_w);
-                    for (key, value) in saved_env {
-                        match value {
-                            Some(v) => env::set_var(&key, v),
-                            None => env::remove_var(&key),
-                        }
-                    }
-                    return InvokeResult::new(1, String::new(), String::new(), Some(e.to_string()));
-                }
-            };
-
-            // Stdout reader (start before running command to avoid pipe buffer deadlocks).
-            let out_reader = thread::spawn(move || {
-                let mut buf = Vec::new();
-                let mut f = unsafe { fs::File::from_raw_fd(out_r) };
-                let _ = f.read_to_end(&mut buf);
-                buf
-            });
-
-            // Write input then close stdin write end.
-            {
-                let mut f = unsafe { fs::File::from_raw_fd(in_w) };
-                let _ = f.write_all(input_str.as_bytes());
-                // f dropped here, closes in_w
-            }
-
-            // Redirect stdio.
-            let redir_ok = dup2_fd(in_r, 0)
-                .and_then(|_| dup2_fd(out_w, 1))
-                .and_then(|_| dup2_fd(err_w, 2))
-                .is_ok();
-
-            // Close unused ends in this thread; fd 0/1/2 now point at redirected targets.
-            close_fd(in_r);
-            close_fd(out_w);
-            close_fd(err_w);
-
-            // Capture stderr and optionally tee it into stdout to match Click's mixed output.
-            let stderr_task = if mix_stderr && redir_ok {
-                // Duplicate fd 1 for tee writes into the same stdout pipe.
-                let tee_fd = dup_fd(1).ok();
-                Some(thread::spawn(move || {
-                    let mut stderr_buf = Vec::new();
-                    let mut err_file = unsafe { fs::File::from_raw_fd(err_r) };
-
-                    if let Some(tee_fd) = tee_fd {
-                        let mut tee = unsafe { fs::File::from_raw_fd(tee_fd) };
-                        let mut buf = [0u8; 8192];
-                        loop {
-                            let n = match err_file.read(&mut buf) {
-                                Ok(0) => break,
-                                Ok(n) => n,
-                                Err(_) => break,
-                            };
-                            let chunk = &buf[..n];
-                            stderr_buf.extend_from_slice(chunk);
-                            let _ = tee.write_all(chunk);
-                            let _ = tee.flush();
-                        }
-                    } else {
-                        let _ = err_file.read_to_end(&mut stderr_buf);
-                    }
-
-                    stderr_buf
-                }))
-            } else {
-                Some(thread::spawn(move || {
-                    let mut stderr_buf = Vec::new();
-                    let mut f = unsafe { fs::File::from_raw_fd(err_r) };
-                    let _ = f.read_to_end(&mut stderr_buf);
-                    stderr_buf
-                }))
-            };
-
-            let result = if redir_ok {
-                cmd.main(args_owned)
-            } else {
-                // If redirection failed, fall back to running without capture.
-                cmd.main(args_owned)
-            };
-
-            let _ = io::stdout().flush();
-            let _ = io::stderr().flush();
-
-            // Restore stdio.
-            let _ = dup2_fd(saved_stdin, 0);
-            let _ = dup2_fd(saved_stdout, 1);
-            let _ = dup2_fd(saved_stderr, 2);
-            close_fd(saved_stdin);
-            close_fd(saved_stdout);
-            close_fd(saved_stderr);
-
-            let output_bytes = out_reader.join().unwrap_or_default();
-            let stderr_bytes = stderr_task
-                .and_then(|h| h.join().ok())
-                .unwrap_or_default();
-
-            (result, output_bytes, stderr_bytes)
-        };
-
-        #[cfg(not(unix))]
-        let (result, output_bytes, stderr_bytes) = {
-            let _ = input_str; // keep behavior consistent: consume input parameter
-            let result = cmd.main(args_owned);
-            (result, Vec::new(), Vec::new())
-        };
 
         // Determine exit code and exception message
         let (exit_code, exception_message) = match &result {
@@ -485,7 +529,7 @@ impl CliRunner {
             Err(e) => (e.exit_code(), Some(e.to_string())),
         };
 
-        let mut stdout = String::from_utf8_lossy(&output_bytes).to_string();
+        let mut stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
         let stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
 
         // Echo stdin into stdout like Python Click's CliRunner when enabled.
@@ -549,7 +593,7 @@ pub struct InvokeResult {
     /// Captured stdout (and stderr if `mix_stderr` is true).
     pub output: String,
 
-    /// Captured stderr (empty if `mix_stderr` is true).
+    /// Captured stderr (always captured, even if mixed into `output`).
     pub stderr: String,
 
     /// The error message if an exception occurred.
@@ -559,7 +603,12 @@ pub struct InvokeResult {
 impl InvokeResult {
     /// Create a new InvokeResult for testing purposes.
     #[doc(hidden)]
-    pub fn new(exit_code: i32, output: String, stderr: String, exception_message: Option<String>) -> Self {
+    pub fn new(
+        exit_code: i32,
+        output: String,
+        stderr: String,
+        exception_message: Option<String>,
+    ) -> Self {
         Self {
             exit_code,
             output,
@@ -834,9 +883,12 @@ macro_rules! assert_failure {
     };
     ($result:expr, $code:expr) => {
         assert_eq!(
-            $result.exit_code, $code,
+            $result.exit_code,
+            $code,
             "Expected exit code {} but got {} with output:\n{}",
-            $code, $result.exit_code, $result.combined_output()
+            $code,
+            $result.exit_code,
+            $result.combined_output()
         );
     };
 }
@@ -882,9 +934,7 @@ mod tests {
 
     #[test]
     fn test_cli_runner_env_unset() {
-        let runner = CliRunner::new()
-            .env("KEEP", "value")
-            .env_unset("REMOVE");
+        let runner = CliRunner::new().env("KEEP", "value").env_unset("REMOVE");
 
         assert_eq!(runner.env.len(), 1);
         assert_eq!(runner.env_unset.len(), 1);
@@ -904,9 +954,7 @@ mod tests {
 
     #[test]
     fn test_invoke_simple_command() {
-        let cmd = Command::new("test")
-            .callback(|_ctx| Ok(()))
-            .build();
+        let cmd = Command::new("test").callback(|_ctx| Ok(())).build();
 
         let runner = CliRunner::new();
         let result = runner.invoke(&cmd, &[]);
@@ -990,7 +1038,10 @@ mod tests {
 
         // After drop, the directory is cleaned up
         // Note: We don't test current_dir restoration because it's racy with parallel tests
-        assert!(!iso_path.exists(), "temp directory should be cleaned up after drop");
+        assert!(
+            !iso_path.exists(),
+            "temp directory should be cleaned up after drop"
+        );
     }
 
     #[test]
@@ -1026,7 +1077,9 @@ mod tests {
     fn test_isolated_filesystem_nested_file() {
         let isolated = IsolatedFilesystem::new().unwrap();
 
-        isolated.create_file("dir/nested/file.txt", "content").unwrap();
+        isolated
+            .create_file("dir/nested/file.txt", "content")
+            .unwrap();
         assert!(isolated.file_exists("dir/nested/file.txt"));
         assert_eq!(
             isolated.read_file("dir/nested/file.txt").unwrap(),

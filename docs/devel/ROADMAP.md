@@ -10,7 +10,7 @@ A comprehensive task list for porting Python Click to Rust. Reference: `/home/ms
 
 **Project State:** Phases 1–6 complete (Milestone M4 achieved). Parity suites for phases 1–6 pass via `tests/parity/run_parity.sh`.
 
-**Next Milestone:** 1.0 Release: API polish + docs.
+**Next Milestone:** M5: Cross-platform `CliRunner` output capture (must-capture on Linux/macOS/Windows) + behavior gap hardening.
 
 **Notes:** Some roadmap items are implemented with slightly different Rust APIs than the Python references. See individual phase tables for remaining gaps.
 
@@ -22,6 +22,7 @@ A comprehensive task list for porting Python Click to Rust. Reference: `/home/ms
 | **M2: Minimal CLI** | Phase 2-3 complete | Can parse args, execute commands, display help (no macros) |
 | **M3: Derive Macros** | Phase 4 complete | `#[derive(Command)]` works, parity with Click's decorator API |
 | **M4: Full Port** | Phase 5-6 complete | Terminal UI, shell completion, CliRunner all functional |
+| **M5: Cross-Platform Runner** | Phase 7 complete | `CliRunner` must-capture stdout/stderr on Linux/macOS/Windows + CI matrix |
 | **1.0 Release** | All phases + docs | API stable, comprehensive tests, published to crates.io |
 
 ## Parity Testing Strategy
@@ -448,6 +449,41 @@ These will be resolved during Phase 1-2 implementation. Decisions will be docume
 | Todo | Not started |
 | In Progress | Currently being implemented |
 | Done | Implemented and tested |
+
+---
+
+## Phase 7: Cross-Platform Capture & Hardening (Post-M4)
+
+This phase is required for a real-world 1.0: the test runner must be able to capture
+stdout/stderr reliably on all major OSes, and we need a structured process for closing
+behavior/API gaps beyond the Phase 1–6 parity suite coverage.
+
+### 7.1 `CliRunner` Capture Backends (Must-Capture)
+
+| Status | Task | Notes |
+|--------|------|-------|
+| Done | Define capture semantics | `InvokeResult.output` mirrors Click: `stdout + stderr` when mixed; stderr always captured separately |
+| Done | Refactor capture into per-platform backend | Internal `run_with_capture` with Unix + Windows implementations |
+| Done | Windows backend | Redirect `STD_*` handles via Win32 `SetStdHandle` and capture pipes |
+| In Progress | macOS/Linux verification | Linux verified locally; macOS verified via CI |
+| Done | Panic-safety | Stdio/env restored even if invocation panics |
+
+### 7.2 CI Matrix (Linux/macOS/Windows)
+
+| Status | Task | Notes |
+|--------|------|-------|
+| Done | Add GitHub Actions matrix | `cargo test` on all 3 OSes (stable) |
+| Done | Gate on `CliRunner` capture tests | Existing test suite exercises `CliRunner` capture on Windows |
+| Todo | Optional parity checks | Parity runner depends on Python Click source; may be a separate job |
+
+### 7.3 Behavior/API Gap Mitigation
+
+| Status | Task | Notes |
+|--------|------|-------|
+| Todo | Create “gap inventory” doc | Track intentional vs unintentional divergences from Click |
+| Todo | Expand parity suites incrementally | Add deterministic tests for parsing/completion edge cases |
+| Todo | `make_pass_decorator(ensure=...)` decision | Requires `Context` interior mutability or an alternative API |
+| Todo | Public API stabilization | Audit re-exports + builder surface for 1.0 |
 
 ---
 

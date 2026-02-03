@@ -20,6 +20,15 @@ chrono = { version = "0.4", default-features = false, features = ["std"] }
 libc = "0.2"
 click-derive = { path = "./click-derive", optional = true }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Console",
+  "Win32_System_Pipes",
+] }
+
 [dev-dependencies]
 tempfile = "3.0"
 click-derive = { path = "./click-derive" }
