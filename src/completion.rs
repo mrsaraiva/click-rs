@@ -28,9 +28,10 @@ use std::io::{self, Write};
 
 use crate::command::Command;
 use crate::context::ContextBuilder;
-use crate::group::{CommandLike, Group};
+use crate::group::{CommandCollection, CommandLike, Group};
 use crate::parameter::Parameter;
 use crate::types::CompletionItem;
+use crate::utils::split_arg_string;
 
 // =============================================================================
 // ShellComplete Trait
@@ -132,37 +133,30 @@ impl ShellComplete for BashComplete {
     }
 
     fn get_completion_args(&self) -> CompletionArgs {
-        // COMP_WORDS is a space-separated list of all words
-        // COMP_CWORD is the index of the current word
+        // Match Python Click: parse COMP_WORDS with shell-like splitting.
         let comp_words = env::var("COMP_WORDS").unwrap_or_default();
         let comp_cword: usize = env::var("COMP_CWORD")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
 
-        let words: Vec<&str> = comp_words.split_whitespace().collect();
+        let cwords = split_arg_string(&comp_words);
 
-        // Words before the current position are complete args
-        // The current word (at comp_cword) is the incomplete part
-        let args: Vec<String> = words
+        let args: Vec<String> = cwords
             .iter()
+            .skip(1)
             .take(comp_cword.saturating_sub(1))
-            .skip(1) // Skip program name
-            .map(|s| s.to_string())
+            .cloned()
             .collect();
 
-        let incomplete = if comp_cword > 0 && comp_cword <= words.len() {
-            words.get(comp_cword).map(|s| s.to_string()).unwrap_or_default()
-        } else {
-            String::new()
-        };
+        let incomplete = cwords.get(comp_cword).cloned().unwrap_or_default();
 
         CompletionArgs { args, incomplete }
     }
 
     fn format_completion(&self, item: &CompletionItem) -> String {
-        // Bash expects plain completion values, one per line
-        item.value.clone()
+        // Match Python Click: "type,value"
+        format!("{},{}", item.completion_type, item.value)
     }
 }
 
@@ -224,37 +218,38 @@ impl ShellComplete for ZshComplete {
     }
 
     fn get_completion_args(&self) -> CompletionArgs {
-        // Zsh uses the same env vars as bash when invoked through our script
+        // Match Python Click: parse COMP_WORDS with shell-like splitting.
         let comp_words = env::var("COMP_WORDS").unwrap_or_default();
         let comp_cword: usize = env::var("COMP_CWORD")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
 
-        let words: Vec<&str> = comp_words.split_whitespace().collect();
+        let cwords = split_arg_string(&comp_words);
 
-        let args: Vec<String> = words
+        let args: Vec<String> = cwords
             .iter()
-            .take(comp_cword)
             .skip(1)
-            .map(|s| s.to_string())
+            .take(comp_cword.saturating_sub(1))
+            .cloned()
             .collect();
 
-        let incomplete = if comp_cword > 0 && comp_cword <= words.len() {
-            words.get(comp_cword).map(|s| s.to_string()).unwrap_or_default()
-        } else {
-            String::new()
-        };
+        let incomplete = cwords.get(comp_cword).cloned().unwrap_or_default();
 
         CompletionArgs { args, incomplete }
     }
 
     fn format_completion(&self, item: &CompletionItem) -> String {
-        // Zsh format: value:description (or just value if no description)
-        match &item.help {
-            Some(help) if !help.is_empty() => format!("{}:{}", item.value, help),
-            _ => format!("{}:_", item.value),
-        }
+        // Match Python Click:
+        // - help is "_" when absent
+        // - escape ":" in value iff help != "_"
+        let help = item.help.as_deref().filter(|h| !h.is_empty()).unwrap_or("_");
+        let value = if help != "_" {
+            item.value.replace(':', "\\:")
+        } else {
+            item.value.clone()
+        };
+        format!("{}\n{}\n{}", item.completion_type, value, help)
     }
 }
 
@@ -301,21 +296,36 @@ impl ShellComplete for FishComplete {
     }
 
     fn get_completion_args(&self) -> CompletionArgs {
-        // Fish passes COMP_WORDS as space-separated and COMP_CWORD as the current token
+        // Match Python Click:
+        // - COMP_WORDS is split using shell-like rules
+        // - COMP_CWORD contains the incomplete word (not an index)
+        // - remove incomplete from args if it appears as the last token
         let comp_words = env::var("COMP_WORDS").unwrap_or_default();
-        let incomplete = env::var("COMP_CWORD").unwrap_or_default();
+        let mut incomplete = env::var("COMP_CWORD").unwrap_or_default();
+        if !incomplete.is_empty() {
+            incomplete = split_arg_string(&incomplete)
+                .into_iter()
+                .next()
+                .unwrap_or_default();
+        }
 
-        let words: Vec<&str> = comp_words.split_whitespace().collect();
-
-        // All words except the program name are args
-        let args: Vec<String> = words.iter().skip(1).map(|s| s.to_string()).collect();
+        let mut args: Vec<String> = split_arg_string(&comp_words).into_iter().skip(1).collect();
+        if !incomplete.is_empty() && args.last().is_some_and(|a| a == &incomplete) {
+            args.pop();
+        }
 
         CompletionArgs { args, incomplete }
     }
 
     fn format_completion(&self, item: &CompletionItem) -> String {
-        // Fish format: type,value (type is used for special completions like files)
-        format!("{},{}", item.completion_type, item.value)
+        // Match Python Click:
+        // - "type,value\\thelp" when help exists
+        // - otherwise "type,value"
+        if let Some(help) = item.help.as_deref().filter(|h| !h.is_empty()) {
+            format!("{},{}\t{}", item.completion_type, item.value, help)
+        } else {
+            format!("{},{}", item.completion_type, item.value)
+        }
     }
 }
 
@@ -489,6 +499,28 @@ pub fn get_completions(
             }
         }
     }
+    if let Some(collection) = cmd.as_any().downcast_ref::<CommandCollection>() {
+        if !args.is_empty() {
+            if let Some(subcmd) = collection.get_command(&args[0]) {
+                let remaining_args: Vec<String> = args[1..].to_vec();
+                return get_completions(subcmd, &args[0], &remaining_args, incomplete);
+            }
+        }
+
+        for name in collection.list_commands() {
+            if name.starts_with(incomplete) {
+                let subcmd = collection.get_command(&name);
+                let help = subcmd.map(|c| c.get_short_help());
+                let mut item = CompletionItem::new(&name);
+                if let Some(h) = help {
+                    if !h.is_empty() {
+                        item = item.with_help(h);
+                    }
+                }
+                completions.push(item);
+            }
+        }
+    }
 
     // Complete options
     if incomplete.starts_with('-') || completions.is_empty() {
@@ -496,6 +528,8 @@ pub fn get_completions(
             completions.extend(get_option_completions(command, &ctx, incomplete));
         } else if let Some(group) = cmd.as_any().downcast_ref::<Group>() {
             completions.extend(get_option_completions(&group.command, &ctx, incomplete));
+        } else if let Some(collection) = cmd.as_any().downcast_ref::<CommandCollection>() {
+            completions.extend(get_option_completions(&collection.base.command, &ctx, incomplete));
         }
     }
 
@@ -505,7 +539,7 @@ pub fn get_completions(
 /// Get option completions for a command.
 fn get_option_completions(
     cmd: &Command,
-    _ctx: &crate::context::Context,
+    ctx: &crate::context::Context,
     incomplete: &str,
 ) -> Vec<CompletionItem> {
     let mut completions = Vec::new();
@@ -534,9 +568,30 @@ fn get_option_completions(
         }
     }
 
-    // Add help option
-    if "--help".starts_with(incomplete) {
-        completions.push(CompletionItem::new("--help").with_help("Show this message and exit."));
+    // Add help option completion (if enabled).
+    if let Some(help_opt) = cmd.get_help_option(ctx) {
+        for long in &help_opt.long {
+            if long.starts_with(incomplete) {
+                let mut item = CompletionItem::new(long);
+                if let Some(help) = help_opt.help() {
+                    if !help.is_empty() {
+                        item = item.with_help(help.to_string());
+                    }
+                }
+                completions.push(item);
+            }
+        }
+        for short in &help_opt.short {
+            if short.starts_with(incomplete) {
+                let mut item = CompletionItem::new(short);
+                if let Some(help) = help_opt.help() {
+                    if !help.is_empty() {
+                        item = item.with_help(help.to_string());
+                    }
+                }
+                completions.push(item);
+            }
+        }
     }
 
     completions
@@ -702,10 +757,10 @@ mod tests {
         let bash = BashComplete;
 
         let item = CompletionItem::new("--help");
-        assert_eq!(bash.format_completion(&item), "--help");
+        assert_eq!(bash.format_completion(&item), "plain,--help");
 
         let item_with_help = CompletionItem::new("--name").with_help("Specify name");
-        assert_eq!(bash.format_completion(&item_with_help), "--name");
+        assert_eq!(bash.format_completion(&item_with_help), "plain,--name");
     }
 
     #[test]
@@ -713,10 +768,13 @@ mod tests {
         let zsh = ZshComplete;
 
         let item = CompletionItem::new("--help");
-        assert_eq!(zsh.format_completion(&item), "--help:_");
+        assert_eq!(zsh.format_completion(&item), "plain\n--help\n_");
 
         let item_with_help = CompletionItem::new("--name").with_help("Specify name");
-        assert_eq!(zsh.format_completion(&item_with_help), "--name:Specify name");
+        assert_eq!(
+            zsh.format_completion(&item_with_help),
+            "plain\n--name\nSpecify name"
+        );
     }
 
     #[test]

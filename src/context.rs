@@ -372,6 +372,21 @@ impl Context {
         self.obj.as_ref().and_then(|v| v.downcast_ref::<T>())
     }
 
+    /// Find a user object of type `T` by walking up the parent chain.
+    ///
+    /// This is a convenience for decorator-style helpers that want to accept
+    /// objects stored in a parent context.
+    pub fn find_obj<T: 'static>(&self) -> Option<&T> {
+        let mut current: Option<&Context> = Some(self);
+        while let Some(ctx) = current {
+            if let Some(obj) = ctx.obj::<T>() {
+                return Some(obj);
+            }
+            current = ctx.parent.as_ref().map(|p| p.as_ref());
+        }
+        None
+    }
+
     /// Set the user object.
     pub fn set_obj<T: Any + Send + Sync + 'static>(&mut self, obj: T) {
         self.obj = Some(Arc::new(obj));

@@ -8,9 +8,9 @@ A comprehensive task list for porting Python Click to Rust. Reference: `/home/ms
 
 **Last Updated:** 2026-02-03
 
-**Project State:** Phases 1–4 complete (Milestone M3 achieved). Parity suites for phases 1–4 pass via `tests/parity/run_parity.sh`.
+**Project State:** Phases 1–6 complete (Milestone M4 achieved). Parity suites for phases 1–6 pass via `tests/parity/run_parity.sh`.
 
-**Next Milestone:** M4: Full Port parity (Phase 5–6 parity + remaining ergonomic helpers).
+**Next Milestone:** 1.0 Release: API polish + docs.
 
 **Notes:** Some roadmap items are implemented with slightly different Rust APIs than the Python references. See individual phase tables for remaining gaps.
 
@@ -260,7 +260,7 @@ These will be resolved during Phase 1-2 implementation. Decisions will be docume
 | Done | `Group::resolve_command()` | `core.py:Group.resolve_command` | Parse and find |
 | Done | `Group::invoke()` dispatch | `core.py:Group.invoke` | Subcommand dispatch |
 | Done | Command chaining | `core.py:Group` | Execute multiple |
-| Todo | `CommandCollection` | `core.py:CommandCollection` | Merged groups (not required for M2) |
+| Done | `CommandCollection` | `core.py:CommandCollection` | Merged groups |
 
 ### 3.4 Parity Testing
 
@@ -299,7 +299,7 @@ These will be resolved during Phase 1-2 implementation. Decisions will be docume
 | Done | `#[password_option]` | `decorators.py:password_option` | Password with confirm |
 | Done | `#[pass_context]` | `decorators.py:pass_context` | Inject context |
 | Done | `#[pass_obj]` | `decorators.py:pass_obj` | Inject ctx.obj |
-| Todo | `make_pass_decorator()` equivalent | `decorators.py:make_pass_decorator` | Custom passthrough |
+| Done | `make_pass_decorator()` equivalent | `decorators.py:make_pass_decorator` | Custom passthrough |
 
 ### 4.3 Help Formatting
 
@@ -371,8 +371,8 @@ These will be resolved during Phase 1-2 implementation. Decisions will be docume
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | Python test scripts for termui | `tests/parity/phase5/python/` | test_termui.py |
-| Todo | Rust parity binary crate | `tests/parity/phase5/rust/` | Matching output format |
+| Done | Python test scripts for termui | `tests/parity/phase5/python/` | test_termui.py |
+| Done | Rust parity binary crate | `tests/parity/phase5/rust/` | Matching output format |
 
 ---
 
@@ -422,9 +422,9 @@ These will be resolved during Phase 1-2 implementation. Decisions will be docume
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | Python test scripts for Completion | `tests/parity/phase6/python/` | test_completion.py |
-| Todo | Python test scripts for Testing | `tests/parity/phase6/python/` | test_testing.py |
-| Todo | Rust parity binary crate | `tests/parity/phase6/rust/` | Matching output format |
+| Done | Python test scripts for Completion | `tests/parity/phase6/python/` | test_completion.py |
+| Done | Python test scripts for Testing | `tests/parity/phase6/python/` | test_testing.py |
+| Done | Rust parity binary crate | `tests/parity/phase6/rust/` | Matching output format |
 
 ---
 

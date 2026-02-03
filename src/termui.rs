@@ -576,12 +576,14 @@ pub fn echo(message: &str, nl: bool, err: bool, color: Option<bool>) {
     if err {
         if nl {
             eprintln!("{}", output);
+            let _ = io::stderr().flush();
         } else {
             eprint!("{}", output);
             let _ = io::stderr().flush();
         }
     } else if nl {
         println!("{}", output);
+        let _ = io::stdout().flush();
     } else {
         print!("{}", output);
         let _ = io::stdout().flush();

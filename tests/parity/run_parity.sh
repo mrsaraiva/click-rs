@@ -123,6 +123,8 @@ get_modules() {
         phase2) echo "context parameter" ;;
         phase3) echo "parser command group" ;;
         phase4) echo "decorators formatting" ;;
+        phase5) echo "termui" ;;
+        phase6) echo "completion testing" ;;
         *) echo "" ;;
     esac
 }

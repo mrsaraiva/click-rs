@@ -155,7 +155,7 @@ fn test_bash_format_completion_plain() {
     let bash = BashComplete;
     let item = CompletionItem::new("--help");
 
-    assert_eq!(bash.format_completion(&item), "--help");
+    assert_eq!(bash.format_completion(&item), "plain,--help");
 }
 
 #[test]
@@ -163,8 +163,8 @@ fn test_bash_format_completion_with_help() {
     let bash = BashComplete;
     let item = CompletionItem::new("--name").with_help("Specify name");
 
-    // Bash doesn't include help in the completion value
-    assert_eq!(bash.format_completion(&item), "--name");
+    // Bash includes type + value (help is not included on bash output)
+    assert_eq!(bash.format_completion(&item), "plain,--name");
 }
 
 #[test]
@@ -172,8 +172,7 @@ fn test_zsh_format_completion_plain() {
     let zsh = ZshComplete;
     let item = CompletionItem::new("--help");
 
-    // Zsh uses value:_ format for items without descriptions
-    assert_eq!(zsh.format_completion(&item), "--help:_");
+    assert_eq!(zsh.format_completion(&item), "plain\n--help\n_");
 }
 
 #[test]
@@ -181,8 +180,7 @@ fn test_zsh_format_completion_with_help() {
     let zsh = ZshComplete;
     let item = CompletionItem::new("--name").with_help("Specify name");
 
-    // Zsh uses value:description format
-    assert_eq!(zsh.format_completion(&item), "--name:Specify name");
+    assert_eq!(zsh.format_completion(&item), "plain\n--name\nSpecify name");
 }
 
 #[test]

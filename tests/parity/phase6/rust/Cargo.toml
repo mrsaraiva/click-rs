@@ -1,0 +1,11 @@
+[package]
+name = "parity-phase6"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+click = { path = "../../../.." }
+
+[workspace]
+

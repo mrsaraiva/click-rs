@@ -735,6 +735,420 @@ impl CommandLike for Group {
 }
 
 // =============================================================================
+// CommandCollection
+// =============================================================================
+
+/// A group-like command that merges commands from multiple groups.
+///
+/// This is the click-rs equivalent of Python Click's `CommandCollection`.
+/// Commands are resolved by searching the base group first, then each source
+/// group in insertion order.
+///
+/// Only the base group's parameters (options/arguments/callback/help) are used.
+#[derive(Debug)]
+pub struct CommandCollection {
+    /// The base group providing parameters and help formatting.
+    pub base: Group,
+
+    /// Additional groups to source subcommands from.
+    pub sources: Vec<Group>,
+}
+
+impl CommandCollection {
+    /// Create a new `CommandCollection` builder with the given base name.
+    ///
+    /// The base group can register its own subcommands via `.command(...)`.
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new(name: &str) -> CommandCollectionBuilder {
+        CommandCollectionBuilder::new(name)
+    }
+
+    /// Add a source group.
+    pub fn add_source(&mut self, group: Group) {
+        self.sources.push(group);
+    }
+
+    /// Get a subcommand by name, searching base first then sources.
+    pub fn get_command(&self, name: &str) -> Option<&dyn CommandLike> {
+        if let Some(cmd) = self.base.get_command(name) {
+            return Some(cmd);
+        }
+        for src in &self.sources {
+            if let Some(cmd) = src.get_command(name) {
+                return Some(cmd);
+            }
+        }
+        None
+    }
+
+    /// List all unique subcommand names from base + sources, sorted.
+    pub fn list_commands(&self) -> Vec<String> {
+        let mut names: std::collections::HashSet<String> =
+            self.base.commands.keys().cloned().collect();
+
+        for src in &self.sources {
+            for name in src.commands.keys() {
+                names.insert(name.clone());
+            }
+        }
+
+        let mut out: Vec<String> = names.into_iter().collect();
+        out.sort();
+        out
+    }
+
+    fn resolve_command<'a>(
+        &'a self,
+        ctx: &Context,
+        args: &[String],
+    ) -> Result<Option<(String, &'a dyn CommandLike, Vec<String>)>, ClickError> {
+        if args.is_empty() {
+            return Ok(None);
+        }
+
+        let cmd_name = &args[0];
+        let remaining = args[1..].to_vec();
+
+        if let Some(cmd) = self.base.commands.get(cmd_name) {
+            return Ok(Some((cmd_name.clone(), cmd.as_ref(), remaining)));
+        }
+        for src in &self.sources {
+            if let Some(cmd) = src.commands.get(cmd_name) {
+                return Ok(Some((cmd_name.clone(), cmd.as_ref(), remaining)));
+            }
+        }
+
+        if ctx.resilient_parsing() {
+            return Ok(None);
+        }
+        if cmd_name.starts_with('-') {
+            return Ok(None);
+        }
+
+        Err(ClickError::usage(format!("No such command '{}'.", cmd_name)))
+    }
+
+    fn format_commands(&self, _ctx: &Context) -> String {
+        let mut visible_cmds: Vec<(String, &dyn CommandLike)> = self
+            .list_commands()
+            .into_iter()
+            .filter_map(|name| {
+                self.get_command(&name)
+                    .filter(|cmd| !cmd.is_hidden())
+                    .map(|cmd| (name, cmd))
+            })
+            .collect();
+
+        if visible_cmds.is_empty() {
+            return String::new();
+        }
+
+        visible_cmds.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let max_width = visible_cmds
+            .iter()
+            .map(|(name, _)| name.len())
+            .max()
+            .unwrap_or(0);
+
+        let mut lines = Vec::new();
+        lines.push("Commands:".to_string());
+
+        for (name, cmd) in visible_cmds {
+            let help = cmd.get_short_help();
+            let padding = max_width - name.len() + 2;
+            lines.push(format!("  {}{:padding$}{}", name, "", help, padding = padding));
+        }
+
+        lines.join("\n")
+    }
+
+    fn get_usage_with_subcommand(&self, ctx: &Context) -> String {
+        let base_usage = self.base.command.get_usage(ctx);
+        format!("{} {}", base_usage, self.base.subcommand_metavar)
+    }
+
+    fn get_help_with_commands(&self, ctx: &Context) -> String {
+        let mut parts = Vec::new();
+
+        parts.push(self.get_usage_with_subcommand(ctx));
+
+        if let Some(ref help) = self.base.command.help {
+            let text = help.lines().next().unwrap_or("");
+            if !text.is_empty() {
+                parts.push(String::new());
+                let help_text = if let Some(ref dep) = self.base.command.deprecated {
+                    if dep.is_empty() {
+                        format!("{}  (DEPRECATED)", text)
+                    } else {
+                        format!("{}  (DEPRECATED: {})", text, dep)
+                    }
+                } else {
+                    text.to_string()
+                };
+                parts.push(format!("  {}", help_text));
+            }
+        }
+
+        let opt_records: Vec<(String, String)> = self
+            .base
+            .command
+            .options
+            .iter()
+            .filter_map(|opt| opt.get_help_record())
+            .collect();
+
+        let help_opt = self.base.command.get_help_option(ctx);
+        let help_record = help_opt.as_ref().and_then(|h| h.get_help_record());
+
+        if !opt_records.is_empty() || help_record.is_some() {
+            parts.push(String::new());
+            parts.push("Options:".to_string());
+
+            for (opt_str, help) in &opt_records {
+                parts.push(format!("  {}  {}", opt_str, help));
+            }
+            if let Some((opt_str, help)) = help_record {
+                parts.push(format!("  {}  {}", opt_str, help));
+            }
+        }
+
+        let commands_section = self.format_commands(ctx);
+        if !commands_section.is_empty() {
+            parts.push(String::new());
+            parts.push(commands_section);
+        }
+
+        if let Some(ref epilog) = self.base.command.epilog {
+            parts.push(String::new());
+            parts.push(epilog.clone());
+        }
+
+        parts.join("\n")
+    }
+}
+
+impl CommandLike for CommandCollection {
+    fn name(&self) -> Option<&str> {
+        self.base.command.name.as_deref()
+    }
+
+    fn make_context(
+        &self,
+        info_name: &str,
+        args: Vec<String>,
+        parent: Option<Arc<Context>>,
+    ) -> Result<Context, ClickError> {
+        let mut builder = ContextBuilder::new()
+            .info_name(info_name)
+            .allow_extra_args(true)
+            .allow_interspersed_args(false);
+
+        if let Some(parent) = parent {
+            builder = builder.parent(parent);
+        }
+
+        let mut ctx = builder.build();
+        self.base.command.parse_args(&mut ctx, args)?;
+        Ok(ctx)
+    }
+
+    fn invoke(&self, ctx: &Context) -> Result<(), ClickError> {
+        let args = ctx.args().to_vec();
+
+        let process_result =
+            |result_callback: &Option<ResultCallback>,
+             ctx: &Context,
+             results: Vec<Box<dyn Any + Send + Sync>>|
+             -> Result<(), ClickError> {
+                if let Some(ref callback) = result_callback {
+                    callback(ctx, results)?;
+                }
+                Ok(())
+            };
+
+        let parent_arc = get_current_context();
+        let resolved = self.resolve_command(ctx, &args)?;
+
+        if resolved.is_none() {
+            if self.base.invoke_without_command {
+                let group_result = self.base.command.invoke(ctx);
+                if group_result.is_ok() {
+                    process_result(&self.base.result_callback, ctx, Vec::new())?;
+                }
+                return group_result;
+            } else if self.base.subcommand_required && !ctx.resilient_parsing() {
+                return Err(ClickError::usage("Missing command."));
+            } else {
+                return Ok(());
+            }
+        }
+
+        if !self.base.chain {
+            let (cmd_name, cmd, remaining) = resolved.unwrap();
+
+            if self.base.command.callback.is_some() {
+                self.base.command.invoke(ctx)?;
+            }
+
+            let sub_ctx = cmd.make_context(&cmd_name, remaining, parent_arc)?;
+
+            let sub_ctx_arc = Arc::new(sub_ctx);
+            push_context(Arc::clone(&sub_ctx_arc));
+            let result = cmd.invoke(&sub_ctx_arc);
+            pop_context();
+            sub_ctx_arc.close();
+
+            if result.is_ok() {
+                process_result(&self.base.result_callback, ctx, Vec::new())?;
+            }
+
+            result
+        } else {
+            if self.base.command.callback.is_some() {
+                self.base.command.invoke(ctx)?;
+            }
+
+            let mut contexts: Vec<(Arc<Context>, &dyn CommandLike)> = Vec::new();
+            let mut remaining_args = args;
+
+            while !remaining_args.is_empty() {
+                let resolved = self.resolve_command(ctx, &remaining_args)?;
+                match resolved {
+                    Some((cmd_name, cmd, rest)) => {
+                        let mut sub_ctx = ContextBuilder::new()
+                            .info_name(&cmd_name)
+                            .allow_extra_args(true)
+                            .allow_interspersed_args(false)
+                            .parent(
+                                parent_arc
+                                    .clone()
+                                    .unwrap_or_else(|| Arc::new(Context::default())),
+                            )
+                            .build();
+
+                        if let Some(command) = cmd.as_any().downcast_ref::<Command>() {
+                            command.parse_args(&mut sub_ctx, rest)?;
+                        } else if let Some(group) = cmd.as_any().downcast_ref::<Group>() {
+                            sub_ctx = group.make_context(&cmd_name, rest, parent_arc.clone())?;
+                        } else if let Some(collection) =
+                            cmd.as_any().downcast_ref::<CommandCollection>()
+                        {
+                            sub_ctx =
+                                collection.make_context(&cmd_name, rest, parent_arc.clone())?;
+                        } else {
+                            sub_ctx = cmd.make_context(&cmd_name, rest, parent_arc.clone())?;
+                        }
+
+                        remaining_args = sub_ctx.args().to_vec();
+                        contexts.push((Arc::new(sub_ctx), cmd));
+                    }
+                    None => {
+                        if !remaining_args.is_empty()
+                            && remaining_args[0].starts_with('-')
+                            && !ctx.resilient_parsing()
+                        {
+                            return Err(ClickError::usage(format!(
+                                "No such option: {}",
+                                remaining_args[0]
+                            )));
+                        }
+                        break;
+                    }
+                }
+            }
+
+            let mut results: Vec<Box<dyn Any + Send + Sync>> = Vec::new();
+            for (sub_ctx_arc, cmd) in contexts {
+                push_context(Arc::clone(&sub_ctx_arc));
+                let result = cmd.invoke(&sub_ctx_arc);
+                pop_context();
+                sub_ctx_arc.close();
+                result?;
+                results.push(Box::new(()));
+            }
+
+            process_result(&self.base.result_callback, ctx, results)?;
+            Ok(())
+        }
+    }
+
+    #[allow(clippy::arc_with_non_send_sync)]
+    fn main(&self, args: Vec<String>) -> Result<(), ClickError> {
+        let prog_name = self
+            .base
+            .command
+            .name
+            .clone()
+            .unwrap_or_else(|| std::env::args().next().unwrap_or_else(|| "program".to_string()));
+
+        let ctx = self.make_context(&prog_name, args, None)?;
+        let ctx = Arc::new(ctx);
+
+        push_context(Arc::clone(&ctx));
+        let result = self.invoke(&ctx);
+        pop_context();
+        ctx.close();
+        result
+    }
+
+    fn get_help(&self, ctx: &Context) -> String {
+        self.get_help_with_commands(ctx)
+    }
+
+    fn get_short_help(&self) -> String {
+        self.base.command.get_short_help()
+    }
+
+    fn is_hidden(&self) -> bool {
+        self.base.command.hidden
+    }
+
+    fn get_usage(&self, ctx: &Context) -> String {
+        self.get_usage_with_subcommand(ctx)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+/// Builder for [`CommandCollection`].
+pub struct CommandCollectionBuilder {
+    base: GroupBuilder,
+    sources: Vec<Group>,
+}
+
+impl CommandCollectionBuilder {
+    fn new(name: &str) -> Self {
+        Self {
+            base: GroupBuilder::new(name),
+            sources: Vec::new(),
+        }
+    }
+
+    /// Add a source group.
+    pub fn source(mut self, group: Group) -> Self {
+        self.sources.push(group);
+        self
+    }
+
+    /// Add a subcommand to the base group.
+    pub fn command(mut self, cmd: impl CommandLike + 'static) -> Self {
+        self.base = self.base.command(cmd);
+        self
+    }
+
+    /// Build the `CommandCollection`.
+    pub fn build(self) -> CommandCollection {
+        CommandCollection {
+            base: self.base.build(),
+            sources: self.sources,
+        }
+    }
+}
+
+// =============================================================================
 // GroupBuilder
 // =============================================================================
 
@@ -1769,5 +2183,43 @@ mod tests {
 
         let order = call_order.lock().unwrap();
         assert_eq!(*order, vec!["group", "a", "b"]);
+    }
+
+    #[test]
+    fn test_command_collection_list_commands_union_sorted() {
+        let src = Group::new("src")
+            .command(Command::new("c").help("C").build())
+            .command(Command::new("b").help("B").build())
+            .build();
+
+        let collection = CommandCollection::new("coll")
+            .command(Command::new("a").help("A").build())
+            .source(src)
+            .build();
+
+        assert_eq!(
+            collection.list_commands(),
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_command_collection_prefers_base_over_sources() {
+        let src = Group::new("src")
+            .command(Command::new("dup").help("Src").build())
+            .build();
+
+        let collection = CommandCollection::new("coll")
+            .command(Command::new("dup").help("Base").build())
+            .source(src)
+            .build();
+
+        let ctx = ContextBuilder::new().info_name("coll").build();
+        let help = collection.get_help(&ctx);
+        assert!(help.contains("dup"));
+        assert_eq!(
+            collection.get_command("dup").unwrap().get_short_help(),
+            "Base"
+        );
     }
 }

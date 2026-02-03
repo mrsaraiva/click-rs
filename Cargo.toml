@@ -17,6 +17,7 @@ categories = ["command-line-interface"]
 thiserror = "2.0"
 uuid = { version = "1.0", features = ["v4", "std"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
+libc = "0.2"
 click-derive = { path = "./click-derive", optional = true }
 
 [dev-dependencies]

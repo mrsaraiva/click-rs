@@ -33,8 +33,64 @@ use std::env;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::thread;
+
+#[cfg(unix)]
+use std::os::unix::io::{FromRawFd, RawFd};
 
 use crate::group::CommandLike;
+
+#[cfg(unix)]
+fn pipe() -> io::Result<(RawFd, RawFd)> {
+    let mut fds = [0; 2];
+    let rc = unsafe { libc::pipe(fds.as_mut_ptr()) };
+    if rc == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok((fds[0], fds[1]))
+}
+
+#[cfg(unix)]
+fn dup_fd(fd: RawFd) -> io::Result<RawFd> {
+    let rc = unsafe { libc::dup(fd) };
+    if rc == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(rc)
+}
+
+#[cfg(unix)]
+fn dup2_fd(from: RawFd, to: RawFd) -> io::Result<()> {
+    let rc = unsafe { libc::dup2(from, to) };
+    if rc == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn close_fd(fd: RawFd) {
+    unsafe {
+        libc::close(fd);
+    }
+}
+
+/// A global lock used to serialize stdio redirection during output capture.
+///
+/// Output capture redirects process-global file descriptors, which is not safe
+/// to do concurrently from multiple threads. The lock prevents tests (and other
+/// concurrent invocations) from corrupting each other's stdio streams.
+#[cfg(unix)]
+static IO_CAPTURE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+#[cfg(unix)]
+fn capture_lock() -> std::sync::MutexGuard<'static, ()> {
+    IO_CAPTURE_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("IO capture lock poisoned")
+}
 
 // =============================================================================
 // CliRunner
@@ -215,25 +271,213 @@ impl CliRunner {
             env::remove_var(key);
         }
 
-        // Note: In a full implementation, we would capture stdout/stderr here
-        // using something like the `gag` crate. For now, output capture is limited.
-
         // Convert args to owned strings
         let args_owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
 
-        // Build echo prefix if input provided
-        let echo_prefix = if self.echo_stdin {
-            input.map(|s| s.to_string())
-        } else {
-            None
+        // Always provide a stdin stream (empty by default) to avoid hanging on interactive reads.
+        let input_str = input.unwrap_or("");
+
+        // Run the command with captured output where possible.
+        #[cfg(unix)]
+        let (result, output_bytes, stderr_bytes) = {
+            let _lock = capture_lock();
+            let mix_stderr = self.mix_stderr;
+
+            // Pipes for stdout/stderr capture.
+            let (out_r, out_w) = match pipe() {
+                Ok(v) => v,
+                Err(e) => {
+                    // Restore environment and return a synthetic failure result.
+                    for (key, value) in saved_env {
+                        match value {
+                            Some(v) => env::set_var(&key, v),
+                            None => env::remove_var(&key),
+                        }
+                    }
+                    return InvokeResult::new(1, String::new(), String::new(), Some(e.to_string()));
+                }
+            };
+            let (err_r, err_w) = match pipe() {
+                Ok(v) => v,
+                Err(e) => {
+                    close_fd(out_r);
+                    close_fd(out_w);
+                    for (key, value) in saved_env {
+                        match value {
+                            Some(v) => env::set_var(&key, v),
+                            None => env::remove_var(&key),
+                        }
+                    }
+                    return InvokeResult::new(1, String::new(), String::new(), Some(e.to_string()));
+                }
+            };
+
+            // Pipe for stdin (write input, then close write end to send EOF).
+            let (in_r, in_w) = match pipe() {
+                Ok(v) => v,
+                Err(e) => {
+                    close_fd(out_r);
+                    close_fd(out_w);
+                    close_fd(err_r);
+                    close_fd(err_w);
+                    for (key, value) in saved_env {
+                        match value {
+                            Some(v) => env::set_var(&key, v),
+                            None => env::remove_var(&key),
+                        }
+                    }
+                    return InvokeResult::new(1, String::new(), String::new(), Some(e.to_string()));
+                }
+            };
+
+            // Save original fds.
+            let saved_stdin = match dup_fd(0) {
+                Ok(fd) => fd,
+                Err(e) => {
+                    close_fd(out_w);
+                    close_fd(err_w);
+                    close_fd(in_r);
+                    close_fd(in_w);
+                    for (key, value) in saved_env {
+                        match value {
+                            Some(v) => env::set_var(&key, v),
+                            None => env::remove_var(&key),
+                        }
+                    }
+                    return InvokeResult::new(1, String::new(), String::new(), Some(e.to_string()));
+                }
+            };
+            let saved_stdout = match dup_fd(1) {
+                Ok(fd) => fd,
+                Err(e) => {
+                    close_fd(saved_stdin);
+                    close_fd(out_w);
+                    close_fd(err_w);
+                    close_fd(in_r);
+                    close_fd(in_w);
+                    for (key, value) in saved_env {
+                        match value {
+                            Some(v) => env::set_var(&key, v),
+                            None => env::remove_var(&key),
+                        }
+                    }
+                    return InvokeResult::new(1, String::new(), String::new(), Some(e.to_string()));
+                }
+            };
+            let saved_stderr = match dup_fd(2) {
+                Ok(fd) => fd,
+                Err(e) => {
+                    close_fd(saved_stdin);
+                    close_fd(saved_stdout);
+                    close_fd(out_w);
+                    close_fd(err_w);
+                    close_fd(in_r);
+                    close_fd(in_w);
+                    for (key, value) in saved_env {
+                        match value {
+                            Some(v) => env::set_var(&key, v),
+                            None => env::remove_var(&key),
+                        }
+                    }
+                    return InvokeResult::new(1, String::new(), String::new(), Some(e.to_string()));
+                }
+            };
+
+            // Stdout reader (start before running command to avoid pipe buffer deadlocks).
+            let out_reader = thread::spawn(move || {
+                let mut buf = Vec::new();
+                let mut f = unsafe { fs::File::from_raw_fd(out_r) };
+                let _ = f.read_to_end(&mut buf);
+                buf
+            });
+
+            // Write input then close stdin write end.
+            {
+                let mut f = unsafe { fs::File::from_raw_fd(in_w) };
+                let _ = f.write_all(input_str.as_bytes());
+                // f dropped here, closes in_w
+            }
+
+            // Redirect stdio.
+            let redir_ok = dup2_fd(in_r, 0)
+                .and_then(|_| dup2_fd(out_w, 1))
+                .and_then(|_| dup2_fd(err_w, 2))
+                .is_ok();
+
+            // Close unused ends in this thread; fd 0/1/2 now point at redirected targets.
+            close_fd(in_r);
+            close_fd(out_w);
+            close_fd(err_w);
+
+            // Capture stderr and optionally tee it into stdout to match Click's mixed output.
+            let stderr_task = if mix_stderr && redir_ok {
+                // Duplicate fd 1 for tee writes into the same stdout pipe.
+                let tee_fd = dup_fd(1).ok();
+                Some(thread::spawn(move || {
+                    let mut stderr_buf = Vec::new();
+                    let mut err_file = unsafe { fs::File::from_raw_fd(err_r) };
+
+                    if let Some(tee_fd) = tee_fd {
+                        let mut tee = unsafe { fs::File::from_raw_fd(tee_fd) };
+                        let mut buf = [0u8; 8192];
+                        loop {
+                            let n = match err_file.read(&mut buf) {
+                                Ok(0) => break,
+                                Ok(n) => n,
+                                Err(_) => break,
+                            };
+                            let chunk = &buf[..n];
+                            stderr_buf.extend_from_slice(chunk);
+                            let _ = tee.write_all(chunk);
+                            let _ = tee.flush();
+                        }
+                    } else {
+                        let _ = err_file.read_to_end(&mut stderr_buf);
+                    }
+
+                    stderr_buf
+                }))
+            } else {
+                Some(thread::spawn(move || {
+                    let mut stderr_buf = Vec::new();
+                    let mut f = unsafe { fs::File::from_raw_fd(err_r) };
+                    let _ = f.read_to_end(&mut stderr_buf);
+                    stderr_buf
+                }))
+            };
+
+            let result = if redir_ok {
+                cmd.main(args_owned)
+            } else {
+                // If redirection failed, fall back to running without capture.
+                cmd.main(args_owned)
+            };
+
+            let _ = io::stdout().flush();
+            let _ = io::stderr().flush();
+
+            // Restore stdio.
+            let _ = dup2_fd(saved_stdin, 0);
+            let _ = dup2_fd(saved_stdout, 1);
+            let _ = dup2_fd(saved_stderr, 2);
+            close_fd(saved_stdin);
+            close_fd(saved_stdout);
+            close_fd(saved_stderr);
+
+            let output_bytes = out_reader.join().unwrap_or_default();
+            let stderr_bytes = stderr_task
+                .and_then(|h| h.join().ok())
+                .unwrap_or_default();
+
+            (result, output_bytes, stderr_bytes)
         };
 
-        // Note: In a real implementation, we would redirect stdout/stderr here.
-        // For now, we just run the command and capture the result.
-        // A full implementation would use something like `gag` crate or OS-specific redirection.
-
-        // Run the command
-        let result = cmd.main(args_owned);
+        #[cfg(not(unix))]
+        let (result, output_bytes, stderr_bytes) = {
+            let _ = input_str; // keep behavior consistent: consume input parameter
+            let result = cmd.main(args_owned);
+            (result, Vec::new(), Vec::new())
+        };
 
         // Determine exit code and exception message
         let (exit_code, exception_message) = match &result {
@@ -241,16 +485,19 @@ impl CliRunner {
             Err(e) => (e.exit_code(), Some(e.to_string())),
         };
 
-        // Build output (Note: actual stdout capture would go here)
-        let mut output = String::new();
-        if let Some(prefix) = echo_prefix {
-            output.push_str(&prefix);
+        let mut stdout = String::from_utf8_lossy(&output_bytes).to_string();
+        let stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
+
+        // Echo stdin into stdout like Python Click's CliRunner when enabled.
+        if self.echo_stdin && !input_str.is_empty() {
+            stdout = format!("{}{}", input_str, stdout);
         }
 
-        // Note: Without actual stdout capture, we can't get the real output.
-        // This is a limitation - in practice, you'd need to use `gag` or similar.
-        // For testing purposes, commands should be designed to return values
-        // through the context or use explicit output mechanisms.
+        let output = if self.mix_stderr {
+            format!("{}{}", stdout, stderr)
+        } else {
+            stdout
+        };
 
         // Restore environment
         for (key, value) in saved_env {
@@ -260,7 +507,7 @@ impl CliRunner {
             }
         }
 
-        InvokeResult::new(exit_code, output, String::new(), exception_message)
+        InvokeResult::new(exit_code, output, stderr, exception_message)
     }
 
     /// Invoke a command within an isolated filesystem.
@@ -351,10 +598,15 @@ impl InvokeResult {
     /// If `mix_stderr` was true, this is the same as `output`.
     pub fn combined_output(&self) -> String {
         if self.stderr.is_empty() {
-            self.output.clone()
-        } else {
-            format!("{}{}", self.output, self.stderr)
+            return self.output.clone();
         }
+
+        // If output already includes stderr (mix_stderr mode), avoid duplication.
+        if self.output.ends_with(&self.stderr) {
+            return self.output.clone();
+        }
+
+        format!("{}{}", self.output, self.stderr)
     }
 }
 
