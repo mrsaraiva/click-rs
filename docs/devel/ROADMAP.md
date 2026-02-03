@@ -6,7 +6,13 @@ A comprehensive task list for porting Python Click to Rust. Reference: `/home/ms
 
 ## Current Status
 
-**Project State:** Phase 1 complete. Error types, parameter type system, and source tracking implemented with 37 unit tests passing. Parity tests fully passing for both types and errors modules.
+**Last Updated:** 2026-02-03
+
+**Project State:** Phases 1–3 complete (Milestone M2 achieved). Core parsing, `Command`/`Group` execution, and help generation are implemented. Unit tests pass (229 + 36). Parity tests pass for phases 1–3 via `tests/parity/run_parity.sh`.
+
+**Next Milestone:** Phase 4 (derive macros + help formatting ergonomics).
+
+**Notes:** Some roadmap items are implemented with slightly different Rust APIs than the Python references (e.g. context stack helpers are exposed as free functions in `click::globals`), but parity behavior is covered by the phase parity suites.
 
 ## Milestones
 
@@ -133,76 +139,76 @@ These will be resolved during Phase 1-2 implementation. Decisions will be docume
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Context` struct | `core.py:Context` | Central execution context |
-| Todo | `Context::new()` with command | `core.py:Context.__init__` | ~30 parameters in Python |
-| Todo | `Context::scope()` push/pop | `core.py:Context.scope` | Thread-local stack |
-| Todo | `Context::params` storage | `core.py:Context.params` | Parsed param values |
-| Todo | `Context::obj` user object | `core.py:Context.obj` | Custom state storage |
-| Todo | `Context::meta` shared dict | `core.py:Context.meta` | Shared across nesting |
-| Todo | `Context::parent` chain | `core.py:Context.parent` | Parent context link |
-| Todo | `Context::command_path` computed | `core.py:Context.command_path` | Full invocation path |
-| Todo | `Context::invoked_subcommand` | `core.py:Context.invoked_subcommand` | Active subcommand |
-| Todo | `Context::default_map` | `core.py:Context.default_map` | Override defaults |
-| Todo | `Context::get_parameter_source()` | `core.py:Context.get_parameter_source` | Source tracking |
-| Todo | `Context::invoke()` smart caller | `core.py:Context.invoke` | Call commands/functions |
-| Todo | `Context::forward()` | `core.py:Context.forward` | Forward to other command |
-| Todo | `Context::fail()` helper | `core.py:Context.fail` | Raise UsageError |
-| Todo | `Context::abort()` helper | `core.py:Context.abort` | Raise Abort |
-| Todo | `Context::exit()` helper | `core.py:Context.exit` | Raise Exit |
-| Todo | `Context::with_resource()` | `core.py:Context.with_resource` | Register cleanup |
-| Todo | `Context::call_on_close()` | `core.py:Context.call_on_close` | Cleanup callbacks |
-| Todo | Thread-local context stack | `globals.py` | `get_current_context()` |
+| Done | `Context` struct | `core.py:Context` | Central execution context |
+| Done | Context construction | `core.py:Context.__init__` | Implemented via `ContextBuilder` + `Command::make_context()` |
+| Done | Context stack push/pop | `core.py:Context.scope` | Implemented via `push_context`/`pop_context` + `get_current_context` |
+| Done | `Context::params` storage | `core.py:Context.params` | Parsed param values |
+| Done | `Context::obj` user object | `core.py:Context.obj` | Custom state storage |
+| Done | `Context::meta` shared dict | `core.py:Context.meta` | Shared across nesting |
+| Done | `Context::parent` chain | `core.py:Context.parent` | Parent context link |
+| Done | `Context::command_path` computed | `core.py:Context.command_path` | Full invocation path |
+| Done | `Context::invoked_subcommand` | `core.py:Context.invoked_subcommand` | Active subcommand |
+| Done | `Context::default_map` | `core.py:Context.default_map` | Override defaults |
+| Done | `Context::get_parameter_source()` | `core.py:Context.get_parameter_source` | Source tracking |
+| Todo | `Context::invoke()` smart caller | `core.py:Context.invoke` | Convenience helper (not required for M2) |
+| Todo | `Context::forward()` | `core.py:Context.forward` | Convenience helper (not required for M2) |
+| Done | `Context::fail()` helper | `core.py:Context.fail` | Usage error helper |
+| Done | `Context::abort()` helper | `core.py:Context.abort` | Abort helper |
+| Done | `Context::exit()` helper | `core.py:Context.exit` | Exit helper |
+| Todo | `Context::with_resource()` | `core.py:Context.with_resource` | Future ergonomic helper (use `call_on_close` today) |
+| Done | `Context::call_on_close()` | `core.py:Context.call_on_close` | Cleanup callbacks |
+| Done | Thread-local context stack | `globals.py` | `get_current_context()` |
 
 ### 2.2 Parameter Base
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Parameter` trait | `core.py:Parameter` | Abstract base |
-| Todo | `Parameter::name` | `core.py:Parameter.name` | Primary name |
-| Todo | `Parameter::nargs` | `core.py:Parameter.nargs` | Argument count (-1 = variadic) |
-| Todo | `Parameter::multiple` | `core.py:Parameter.multiple` | Repeatable |
-| Todo | `Parameter::is_eager` | `core.py:Parameter.is_eager` | Process first |
-| Todo | `Parameter::expose_value` | `core.py:Parameter.expose_value` | Pass to callback |
-| Todo | `Parameter::consume_value()` | `core.py:Parameter.consume_value` | Get value from sources |
-| Todo | `Parameter::handle_parse_result()` | `core.py:Parameter.handle_parse_result` | End-to-end processing |
-| Todo | `Parameter::type_cast_value()` | `core.py:Parameter.type_cast_value` | Type conversion |
-| Todo | `Parameter::resolve_envvar_value()` | `core.py:Parameter.resolve_envvar_value` | Env var lookup |
-| Todo | `Parameter::value_from_envvar()` | `core.py:Parameter.value_from_envvar` | Parse env var |
+| Done | `Parameter` trait | `core.py:Parameter` | Abstract base |
+| Done | `Parameter::name` | `core.py:Parameter.name` | Primary name |
+| Done | `Parameter::nargs` | `core.py:Parameter.nargs` | Argument count (-1 = variadic) |
+| Done | `Parameter::multiple` | `core.py:Parameter.multiple` | Repeatable |
+| Done | `Parameter::is_eager` | `core.py:Parameter.is_eager` | Process first |
+| Done | `Parameter::expose_value` | `core.py:Parameter.expose_value` | Pass to callback |
+| Done | Value consumption pipeline | `core.py:Parameter.consume_value` | Implemented via `Command`/`OptionParser` rather than per-parameter methods |
+| Done | Parse result handling | `core.py:Parameter.handle_parse_result` | Implemented via `Command::make_context` + parser integration |
+| Done | Type casting | `core.py:Parameter.type_cast_value` | Implemented via type converters + parser integration |
+| Done | Envvar resolution | `core.py:Parameter.resolve_envvar_value` | Implemented via envvar support on parameters |
+| Done | Envvar parsing | `core.py:Parameter.value_from_envvar` | Implemented via `TypeConverter::split_envvar_value` |
 
 ### 2.3 Option
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Option` struct | `core.py:Option` | Named parameter |
-| Todo | `Option::is_flag` | `core.py:Option.is_flag` | Boolean flag |
-| Todo | `Option::is_bool_flag` | `core.py:Option.is_bool_flag` | --flag/--no-flag |
-| Todo | `Option::flag_value` | `core.py:Option.flag_value` | Value when flag present |
-| Todo | `Option::count` | `core.py:Option.count` | -v -v -v counting |
-| Todo | `Option::prompt` | `core.py:Option.prompt` | Interactive prompt |
-| Todo | `Option::confirmation_prompt` | `core.py:Option.confirmation_prompt` | Double entry |
-| Todo | `Option::hide_input` | `core.py:Option.hide_input` | Password style |
-| Todo | `Option::show_default` | `core.py:Option.show_default` | Display in help |
-| Todo | `Option::show_envvar` | `core.py:Option.show_envvar` | Display envvar in help |
-| Todo | Long/short name parsing | `core.py:Option` | --name, -n |
-| Todo | `Option::get_help_record()` | `core.py:Option.get_help_record` | Help text entry |
+| Done | `ClickOption` struct | `core.py:Option` | Named parameter |
+| Done | `Option::is_flag` | `core.py:Option.is_flag` | Boolean flag |
+| Done | `Option::is_bool_flag` | `core.py:Option.is_bool_flag` | --flag/--no-flag |
+| Done | `Option::flag_value` | `core.py:Option.flag_value` | Value when flag present |
+| Done | `Option::count` | `core.py:Option.count` | -v -v -v counting |
+| Done | `Option::prompt` | `core.py:Option.prompt` | Interactive prompt |
+| Done | `Option::confirmation_prompt` | `core.py:Option.confirmation_prompt` | Double entry |
+| Done | `Option::hide_input` | `core.py:Option.hide_input` | Password style |
+| Done | `Option::show_default` | `core.py:Option.show_default` | Display in help |
+| Done | `Option::show_envvar` | `core.py:Option.show_envvar` | Display envvar in help |
+| Done | Long/short name parsing | `core.py:Option` | --name, -n |
+| Done | `Option::get_help_record()` | `core.py:Option.get_help_record` | Help text entry |
 
 ### 2.4 Argument
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Argument` struct | `core.py:Argument` | Positional parameter |
-| Todo | Required by default | `core.py:Argument` | Unless default provided |
-| Todo | Single declaration name | `core.py:Argument` | No aliases |
-| Todo | Variadic support (nargs=-1) | `core.py:Argument` | Consume remaining |
-| Todo | `Argument::get_help_record()` | `core.py:Argument.get_help_record` | Help text entry |
+| Done | `Argument` struct | `core.py:Argument` | Positional parameter |
+| Done | Required by default | `core.py:Argument` | Unless default provided |
+| Done | Single declaration name | `core.py:Argument` | No aliases |
+| Done | Variadic support (nargs=-1) | `core.py:Argument` | Consume remaining |
+| Done | `Argument::get_help_record()` | `core.py:Argument.get_help_record` | Help text entry |
 
 ### 2.5 Parity Testing
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | Python test scripts for Context | `tests/parity/phase2/python/` | test_context.py |
-| Todo | Python test scripts for Parameter | `tests/parity/phase2/python/` | test_parameter.py |
-| Todo | Rust parity binary crate | `tests/parity/phase2/rust/` | Matching output format |
+| Done | Python test scripts for Context | `tests/parity/phase2/python/` | test_context.py |
+| Done | Python test scripts for Parameter | `tests/parity/phase2/python/` | test_parameter.py |
+| Done | Rust parity binary crate | `tests/parity/phase2/rust/` | Matching output format |
 
 ---
 
@@ -212,58 +218,58 @@ These will be resolved during Phase 1-2 implementation. Decisions will be docume
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `OptionParser` struct | `parser.py:_OptionParser` | Token-based parser |
-| Todo | `parse_args()` main entry | `parser.py:_OptionParser.parse_args` | Returns (opts, args, order) |
-| Todo | Short option parsing `-x` | `parser.py` | Single char |
-| Todo | Grouped short `-xyz` | `parser.py` | Multiple flags |
-| Todo | Long option `--name=value` | `parser.py` | With = separator |
-| Todo | Long option `--name value` | `parser.py` | Space separator |
-| Todo | `--` terminator | `parser.py` | End option parsing |
-| Todo | Option/arg interspersing | `parser.py` | Mixed positions |
-| Todo | Extra args handling | `parser.py` | After command |
-| Todo | Unknown option error | `parser.py` | NoSuchOption |
-| Todo | `_Argument` internal struct | `parser.py:_Argument` | Argument spec |
-| Todo | `_Option` internal struct | `parser.py:_Option` | Option spec |
+| Done | `OptionParser` struct | `parser.py:_OptionParser` | Token-based parser |
+| Done | `parse_args()` main entry | `parser.py:_OptionParser.parse_args` | Returns parsed values + leftovers |
+| Done | Short option parsing `-x` | `parser.py` | Single char |
+| Done | Grouped short `-xyz` | `parser.py` | Multiple flags |
+| Done | Long option `--name=value` | `parser.py` | With = separator |
+| Done | Long option `--name value` | `parser.py` | Space separator |
+| Done | `--` terminator | `parser.py` | End option parsing |
+| Done | Option/arg interspersing | `parser.py` | Mixed positions |
+| Done | Extra args handling | `parser.py` | After command |
+| Done | Unknown option error | `parser.py` | NoSuchOption |
+| Done | `_Argument` internal struct | `parser.py:_Argument` | Argument spec |
+| Done | `_Option` internal struct | `parser.py:_Option` | Option spec |
 
 ### 3.2 Command
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Command` struct | `core.py:Command` | Basic command |
-| Todo | `Command::callback` | `core.py:Command.callback` | The function to call |
-| Todo | `Command::params` | `core.py:Command.params` | Parameter definitions |
-| Todo | `Command::main()` | `core.py:Command.main` | Entry point |
-| Todo | `Command::make_context()` | `core.py:Command.make_context` | Create context |
-| Todo | `Command::parse_args()` | `core.py:Command.parse_args` | Orchestrate parsing |
-| Todo | `Command::invoke()` | `core.py:Command.invoke` | Call callback |
-| Todo | `Command::get_help()` | `core.py:Command.get_help` | Generate help |
-| Todo | `Command::get_usage()` | `core.py:Command.get_usage` | Usage line |
-| Todo | `Command::format_help()` | `core.py:Command.format_help` | Full help text |
-| Todo | `Command::format_usage()` | `core.py:Command.format_usage` | Full usage text |
-| Todo | Eager parameter ordering | `core.py:_check_iter` | Process --help first |
+| Done | `Command` struct | `core.py:Command` | Basic command |
+| Done | `Command::callback` | `core.py:Command.callback` | The function to call |
+| Done | `Command::params` | `core.py:Command.params` | Parameter definitions |
+| Done | `Command::main()` | `core.py:Command.main` | Entry point |
+| Done | `Command::make_context()` | `core.py:Command.make_context` | Create context |
+| Done | `Command::parse_args()` | `core.py:Command.parse_args` | Orchestrate parsing |
+| Done | `Command::invoke()` | `core.py:Command.invoke` | Call callback |
+| Done | `Command::get_help()` | `core.py:Command.get_help` | Generate help |
+| Done | `Command::get_usage()` | `core.py:Command.get_usage` | Usage line |
+| Done | `Command::format_help()` | `core.py:Command.format_help` | Full help text |
+| Done | `Command::format_usage()` | `core.py:Command.format_usage` | Full usage text |
+| Done | Eager parameter ordering | `core.py:_check_iter` | Process --help first |
 
 ### 3.3 Group
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | `Group` struct | `core.py:Group` | Command container |
-| Todo | `Group::commands` map | `core.py:Group.commands` | Name → Command |
-| Todo | `Group::add_command()` | `core.py:Group.add_command` | Register subcommand |
-| Todo | `Group::get_command()` | `core.py:Group.get_command` | Lookup subcommand |
-| Todo | `Group::list_commands()` | `core.py:Group.list_commands` | Get command names |
-| Todo | `Group::resolve_command()` | `core.py:Group.resolve_command` | Parse and find |
-| Todo | `Group::invoke()` dispatch | `core.py:Group.invoke` | Subcommand dispatch |
-| Todo | Command chaining | `core.py:Group` | Execute multiple |
-| Todo | `CommandCollection` | `core.py:CommandCollection` | Merged groups |
+| Done | `Group` struct | `core.py:Group` | Command container |
+| Done | `Group::commands` map | `core.py:Group.commands` | Name → Command |
+| Done | `Group::add_command()` | `core.py:Group.add_command` | Register subcommand |
+| Done | `Group::get_command()` | `core.py:Group.get_command` | Lookup subcommand |
+| Done | `Group::list_commands()` | `core.py:Group.list_commands` | Get command names |
+| Done | `Group::resolve_command()` | `core.py:Group.resolve_command` | Parse and find |
+| Done | `Group::invoke()` dispatch | `core.py:Group.invoke` | Subcommand dispatch |
+| Done | Command chaining | `core.py:Group` | Execute multiple |
+| Todo | `CommandCollection` | `core.py:CommandCollection` | Merged groups (not required for M2) |
 
 ### 3.4 Parity Testing
 
 | Status | Task | Python Reference | Notes |
 |--------|------|------------------|-------|
-| Todo | Python test scripts for Parser | `tests/parity/phase3/python/` | test_parser.py |
-| Todo | Python test scripts for Command | `tests/parity/phase3/python/` | test_command.py |
-| Todo | Python test scripts for Group | `tests/parity/phase3/python/` | test_group.py |
-| Todo | Rust parity binary crate | `tests/parity/phase3/rust/` | Matching output format |
+| Done | Python test scripts for Parser | `tests/parity/phase3/python/` | test_parser.py |
+| Done | Python test scripts for Command | `tests/parity/phase3/python/` | test_command.py |
+| Done | Python test scripts for Group | `tests/parity/phase3/python/` | test_group.py |
+| Done | Rust parity binary crate | `tests/parity/phase3/rust/` | Matching output format |
 
 ---
 

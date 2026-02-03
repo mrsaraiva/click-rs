@@ -7,19 +7,26 @@ import sys
 import os
 import io
 
-# Insert Click library path before imports
-# Use CLICK_SRC environment variable, or fall back to common locations
+# Insert Click library path before imports.
+# Use CLICK_SRC environment variable, or fall back to common locations.
+#
+# Some environments have these directories present but unreadable; only prepend
+# the path if the Click package can actually be read from it.
+def _maybe_add_click_src(path: str) -> bool:
+    init_py = os.path.join(path, "click", "__init__.py")
+    if os.path.isfile(init_py) and os.access(init_py, os.R_OK):
+        sys.path.insert(0, path)
+        return True
+    return False
+
+
 click_src = os.environ.get("CLICK_SRC")
-if click_src:
-    sys.path.insert(0, click_src)
-else:
-    # Try common locations
+if not (click_src and _maybe_add_click_src(click_src)):
     for path in [
         os.path.expanduser("~/dev/mark/Proj/Libs/click/src"),
         "/home/msaraiva/dev/mark/Proj/Libs/click/src",
     ]:
-        if os.path.isdir(path):
-            sys.path.insert(0, path)
+        if _maybe_add_click_src(path):
             break
 
 from click.exceptions import (

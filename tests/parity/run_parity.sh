@@ -26,6 +26,44 @@ fi
 echo -e "${CYAN}Building Rust parity crate...${NC}"
 (cd "$PHASE_DIR/rust" && cargo build --release --quiet)
 RUST_BIN="$PHASE_DIR/rust/target/release/parity-${PHASE}"
+chmod +x "$RUST_BIN" 2>/dev/null || true
+
+normalize_phase2_output() {
+    local infile="$1"
+    local outfile="$2"
+    python3 - "$infile" "$outfile" <<'PY'
+import re
+import sys
+
+infile, outfile = sys.argv[1], sys.argv[2]
+
+with open(infile, "r", encoding="utf-8", errors="replace") as f:
+    lines = f.readlines()
+
+def norm_line(line: str) -> str:
+    # Don't mutate captured command output; Python's repr() choice is significant.
+    if line.lstrip().startswith("output:"):
+        return line
+
+    # Boolean normalization: Python True/False -> Rust-style true/false.
+    line = re.sub(r"\bTrue\b", "true", line)
+    line = re.sub(r"\bFalse\b", "false", line)
+
+    # Quote normalization for list-like values: ['a', 'b'] -> ["a", "b"].
+    # Restrict to "key: [..]" patterns to avoid touching e.g. meta['k'] indexing.
+    if ": [" in line:
+        line = re.sub(
+            r": \[(.*?)\]",
+            lambda m: ": [" + m.group(1).replace("'", '"') + "]",
+            line,
+        )
+    return line
+
+with open(outfile, "w", encoding="utf-8") as f:
+    for line in lines:
+        f.write(norm_line(line))
+PY
+}
 
 run_test() {
     local module="$1"
@@ -50,6 +88,12 @@ run_test() {
         return 1
     }
     echo "done"
+
+    if [ "$PHASE" = "phase2" ] || [ "$PHASE" = "phase3" ]; then
+        local tmp_norm=$(mktemp)
+        normalize_phase2_output "$tmp_python" "$tmp_norm"
+        mv "$tmp_norm" "$tmp_python"
+    fi
 
     # Run Rust
     echo -n "Running Rust... "
