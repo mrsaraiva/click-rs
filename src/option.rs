@@ -12,7 +12,9 @@ use std::any::Any;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::parameter::{Nargs, Parameter, ParameterConfig};
+use crate::context::Context;
+use crate::error::ClickError;
+use crate::parameter::{Nargs, Parameter, ParameterCallback, ParameterConfig};
 use crate::argument::AnyTypeConverter;
 use crate::types::{StringType, TypeConverter, STRING};
 
@@ -416,6 +418,7 @@ pub struct OptionBuilder {
     type_metavar: Option<String>,
     type_converter: Option<Arc<dyn AnyTypeConverter>>,
     nargs: Nargs,
+    callback: Option<ParameterCallback>,
 }
 
 impl OptionBuilder {
@@ -454,6 +457,7 @@ impl OptionBuilder {
             type_metavar: TypeConverter::get_metavar(&STRING),
             type_converter: None,
             nargs: Nargs::Count(1),
+            callback: None,
         }
     }
 
@@ -541,6 +545,19 @@ impl OptionBuilder {
         self
     }
 
+    /// Set a callback invoked after conversion.
+    pub fn callback<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(&Context, &dyn Parameter, Box<dyn Any + Send + Sync>)
+                -> Result<Box<dyn Any + Send + Sync>, ClickError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.callback = Some(Arc::new(callback));
+        self
+    }
+
     /// Hide this option from help output.
     pub fn hidden(mut self) -> Self {
         self.hidden = true;
@@ -616,6 +633,7 @@ impl OptionBuilder {
             hidden: self.hidden,
             metavar: self.metavar,
             deprecated: None,
+            callback: self.callback,
         };
 
         let type_converter: Arc<dyn AnyTypeConverter> =

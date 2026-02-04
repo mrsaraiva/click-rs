@@ -26,6 +26,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::context::Context;
+use crate::error::ClickError;
 use crate::parameter::{Nargs, Parameter, ParameterConfig};
 use crate::types::{CompletionItem, StringType, TypeConverter};
 
@@ -426,6 +427,19 @@ impl ArgumentBuilder {
         if matches!(n, Nargs::Variadic) {
             self.config.multiple = true;
         }
+        self
+    }
+
+    /// Set a callback invoked after conversion.
+    pub fn callback<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(&Context, &dyn Parameter, Box<dyn Any + Send + Sync>)
+                -> Result<Box<dyn Any + Send + Sync>, ClickError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.config.callback = Some(Arc::new(callback));
         self
     }
 

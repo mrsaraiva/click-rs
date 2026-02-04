@@ -8,8 +8,11 @@
 //!
 //! Based on Python Click's `core.py:Parameter` class (line 2027+).
 
+use std::any::Any;
 use std::fmt;
+use std::sync::Arc;
 
+use crate::context::Context;
 use crate::error::ClickError;
 
 // =============================================================================
@@ -165,11 +168,22 @@ pub trait Parameter: Send + Sync + fmt::Debug {
 // ParameterConfig Struct
 // =============================================================================
 
+/// Callback for parameter value processing.
+///
+/// Receives the current context, the parameter, and the converted value.
+/// Returns the (possibly transformed) value or an error.
+pub type ParameterCallback = Arc<
+    dyn Fn(&Context, &dyn Parameter, Box<dyn Any + Send + Sync>)
+            -> Result<Box<dyn Any + Send + Sync>, ClickError>
+        + Send
+        + Sync,
+>;
+
 /// Common configuration for all parameter types.
 ///
 /// This struct holds the shared settings between Options and Arguments.
 /// It uses a builder pattern for convenient construction.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ParameterConfig {
     /// The parameter name.
     pub name: String,
@@ -193,6 +207,27 @@ pub struct ParameterConfig {
     pub metavar: Option<String>,
     /// Whether this parameter is deprecated.
     pub deprecated: Option<DeprecationInfo>,
+    /// Optional callback invoked after conversion.
+    pub callback: Option<ParameterCallback>,
+}
+
+impl fmt::Debug for ParameterConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ParameterConfig")
+            .field("name", &self.name)
+            .field("nargs", &self.nargs)
+            .field("multiple", &self.multiple)
+            .field("is_eager", &self.is_eager)
+            .field("expose_value", &self.expose_value)
+            .field("required", &self.required)
+            .field("envvar", &self.envvar)
+            .field("help", &self.help)
+            .field("hidden", &self.hidden)
+            .field("metavar", &self.metavar)
+            .field("deprecated", &self.deprecated)
+            .field("has_callback", &self.callback.is_some())
+            .finish()
+    }
 }
 
 /// Information about a deprecated parameter.
@@ -230,6 +265,7 @@ impl Default for ParameterConfig {
             hidden: false,
             metavar: None,
             deprecated: None,
+            callback: None,
         }
     }
 }
@@ -300,6 +336,12 @@ impl ParameterConfig {
     /// Set a custom metavar for help text.
     pub fn metavar(mut self, metavar: impl Into<String>) -> Self {
         self.metavar = Some(metavar.into());
+        self
+    }
+
+    /// Set a callback invoked after conversion.
+    pub fn callback(mut self, callback: ParameterCallback) -> Self {
+        self.callback = Some(callback);
         self
     }
 
