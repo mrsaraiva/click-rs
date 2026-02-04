@@ -463,6 +463,28 @@ impl Command {
         parser.add_argument(arg.name(), nargs_val);
     }
 
+    /// Resolve an environment variable value for a parameter, if configured.
+    fn resolve_envvar_value(&self, ctx: &Context, param: &dyn Parameter) -> Option<String> {
+        let mut candidates: Vec<String> = Vec::new();
+
+        if let Some(envvars) = param.envvar() {
+            candidates.extend(envvars.iter().cloned());
+        } else if let Some(prefix) = ctx.auto_envvar_prefix() {
+            let normalized = param.name().to_uppercase().replace('-', "_");
+            candidates.push(format!("{}_{}", prefix, normalized));
+        }
+
+        for name in candidates {
+            if let Ok(value) = std::env::var(&name) {
+                if !value.is_empty() {
+                    return Some(value);
+                }
+            }
+        }
+
+        None
+    }
+
     /// Process a parsed option value and store it in the context.
     fn process_option_value(
         &self,
@@ -504,6 +526,12 @@ impl Command {
         };
 
         // Convert ParsedValue to a boxed value for storage
+        let envvar_value = if matches!(parsed_value, Some(ParsedValue::Unset) | None) {
+            self.resolve_envvar_value(ctx, opt)
+        } else {
+            None
+        };
+
         let value: Option<Arc<dyn std::any::Any + Send + Sync>> = match parsed_value {
             Some(ParsedValue::Count(n)) => Some(Arc::new(*n)),
             Some(ParsedValue::Flag(b)) => Some(Arc::new(*b)),
@@ -537,7 +565,27 @@ impl Command {
                 Some(convert_single(&fallback)?)
             }
             Some(ParsedValue::Unset) | None => {
-                if opt.count {
+                if let Some(envval) = envvar_value {
+                    if opt.count {
+                        let parsed = envval.parse::<usize>().map_err(|_| {
+                            ClickError::bad_parameter_named(
+                                format!("'{}' is not a valid integer.", envval),
+                                opt.human_readable_name(),
+                            )
+                            .with_context(make_error_ctx())
+                        })?;
+                        Some(Arc::new(parsed))
+                    } else if opt.nargs().is_multi() || opt.multiple() {
+                        let values = opt.type_converter().split_envvar_value(&envval);
+                        if values.is_empty() {
+                            None
+                        } else {
+                            Some(convert_multi(&values)?)
+                        }
+                    } else {
+                        Some(convert_single(&envval)?)
+                    }
+                } else if opt.count {
                     Some(Arc::new(0usize))
                 } else if let Some(ref default) = opt.default {
                     if opt.nargs().is_multi() || opt.multiple() {
@@ -580,6 +628,12 @@ impl Command {
         let name = arg.name();
         let parsed_value = opts.get(name);
 
+        let envvar_value = if matches!(parsed_value, Some(ParsedValue::Unset) | None) {
+            self.resolve_envvar_value(ctx, arg)
+        } else {
+            None
+        };
+
         let make_error_ctx = || {
             ErrorContext::new()
                 .with_command_path(ctx.command_path())
@@ -613,13 +667,28 @@ impl Command {
             Some(ParsedValue::Count(n)) => Some(Arc::new(*n)),
             Some(ParsedValue::Flag(b)) => Some(Arc::new(*b)),
             Some(ParsedValue::FlagNeedsValue) | Some(ParsedValue::Unset) | None => {
-                arg.default_value().map(|d| {
+                if let Some(envval) = envvar_value {
                     if arg.nargs().is_multi() || arg.multiple() {
-                        convert_multi(&vec![d.to_string()]).map_err(|e| e)
+                        let values = arg.type_converter().split_envvar_value(&envval);
+                        if values.is_empty() {
+                            None
+                        } else {
+                            Some(convert_multi(&values)?)
+                        }
                     } else {
-                        convert_single(d).map_err(|e| e)
+                        Some(convert_single(&envval)?)
                     }
-                }).transpose()?
+                } else {
+                    arg.default_value()
+                        .map(|d| {
+                            if arg.nargs().is_multi() || arg.multiple() {
+                                convert_multi(&vec![d.to_string()]).map_err(|e| e)
+                            } else {
+                                convert_single(d).map_err(|e| e)
+                            }
+                        })
+                        .transpose()?
+                }
             }
         };
 
@@ -1491,6 +1560,27 @@ mod tests {
     }
 
     #[test]
+    fn test_option_envvar_value() {
+        std::env::set_var("CLICK_TEST_COUNT", "9");
+        let cmd = Command::new("test")
+            .option(
+                ClickOption::new(&["--count"])
+                    .envvar("CLICK_TEST_COUNT")
+                    .type_any(INT)
+                    .build(),
+            )
+            .build();
+
+        let ctx = cmd.make_context("test", vec![], None);
+        std::env::remove_var("CLICK_TEST_COUNT");
+
+        assert!(ctx.is_ok());
+        let ctx = ctx.unwrap();
+        let count = ctx.get_param::<i64>("count");
+        assert_eq!(count, Some(&9));
+    }
+
+    #[test]
     fn test_argument_type_conversion() {
         let cmd = Command::new("greet")
             .argument(Argument::new("count").type_(INT).build())
@@ -1527,6 +1617,26 @@ mod tests {
         let ctx = ctx.unwrap();
         let name = ctx.get_param::<String>("name");
         assert_eq!(name, Some(&"World".to_string()));
+    }
+
+    #[test]
+    fn test_argument_auto_envvar_prefix() {
+        std::env::set_var("MYAPP_NAME", "Alice");
+        let cmd = Command::new("greet")
+            .argument(Argument::new("name").build())
+            .build();
+
+        let mut ctx = ContextBuilder::new()
+            .info_name("greet")
+            .auto_envvar_prefix("MYAPP")
+            .build();
+
+        let result = cmd.parse_args(&mut ctx, vec![]);
+        std::env::remove_var("MYAPP_NAME");
+
+        assert!(result.is_ok());
+        let name = ctx.get_param::<String>("name");
+        assert_eq!(name, Some(&"Alice".to_string()));
     }
 
     // -------------------------------------------------------------------------

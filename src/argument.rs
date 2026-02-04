@@ -51,6 +51,9 @@ pub trait AnyTypeConverter: Send + Sync {
     /// Returns the metavar for this type.
     fn get_metavar(&self) -> Option<String>;
 
+    /// Split an environment variable value into multiple values.
+    fn split_envvar_value(&self, value: &str) -> Vec<String>;
+
     /// Returns shell completion items for the given incomplete value.
     fn shell_complete(&self, incomplete: &str) -> Vec<CompletionItem>;
 }
@@ -78,6 +81,10 @@ where
 
     fn get_metavar(&self) -> Option<String> {
         TypeConverter::get_metavar(self)
+    }
+
+    fn split_envvar_value(&self, value: &str) -> Vec<String> {
+        TypeConverter::split_envvar_value(self, value)
     }
 
     fn shell_complete(&self, incomplete: &str) -> Vec<CompletionItem> {
