@@ -478,52 +478,76 @@ impl Command {
         let flag_needs_value_key = format!("__click_internal_flag_needs_value_{}", name);
         let had_flag_needs_value = opts.get(&flag_needs_value_key).is_some();
 
+        let make_error_ctx = || {
+            ErrorContext::new()
+                .with_command_path(ctx.command_path())
+                .with_usage(self.get_usage(ctx))
+                .with_help_options(ctx.help_option_names().to_vec())
+        };
+
+        let convert_single = |value: &str| -> Result<Arc<dyn std::any::Any + Send + Sync>, ClickError> {
+            opt.convert_any(value)
+                .map(Arc::from)
+                .map_err(|msg| {
+                    ClickError::bad_parameter_named(msg, opt.human_readable_name())
+                        .with_context(make_error_ctx())
+                })
+        };
+
+        let convert_multi = |values: &[String]| -> Result<Arc<dyn std::any::Any + Send + Sync>, ClickError> {
+            opt.convert_multi(values)
+                .map(Arc::from)
+                .map_err(|msg| {
+                    ClickError::bad_parameter_named(msg, opt.human_readable_name())
+                        .with_context(make_error_ctx())
+                })
+        };
+
         // Convert ParsedValue to a boxed value for storage
         let value: Option<Arc<dyn std::any::Any + Send + Sync>> = match parsed_value {
-            Some(ParsedValue::Single(s)) => Some(Arc::new(s.clone())),
+            Some(ParsedValue::Count(n)) => Some(Arc::new(*n)),
+            Some(ParsedValue::Flag(b)) => Some(Arc::new(*b)),
+            Some(ParsedValue::Single(s)) => Some(convert_single(s)?),
             Some(ParsedValue::Multiple(v)) => {
-                // For multiple values, check if FlagNeedsValue was triggered (Append mode)
-                if had_flag_needs_value && v.is_empty() {
-                    // Option was used as flag in append mode with no value
-                    if let Some(ref flag_val) = opt.flag_value {
-                        Some(Arc::new(vec![flag_val.clone()]) as Arc<dyn std::any::Any + Send + Sync>)
-                    } else if let Some(ref default) = opt.default {
-                        Some(Arc::new(vec![default.clone()]) as Arc<dyn std::any::Any + Send + Sync>)
-                    } else {
-                        Some(Arc::new(vec![String::new()]) as Arc<dyn std::any::Any + Send + Sync>)
-                    }
-                } else if had_flag_needs_value {
-                    // Append the flag_value to the existing values
-                    let mut values = v.clone();
-                    if let Some(ref flag_val) = opt.flag_value {
+                let mut values = v.clone();
+                if had_flag_needs_value {
+                    if values.is_empty() {
+                        if let Some(ref flag_val) = opt.flag_value {
+                            values.push(flag_val.clone());
+                        } else if let Some(ref default) = opt.default {
+                            values.push(default.clone());
+                        } else {
+                            values.push(String::new());
+                        }
+                    } else if let Some(ref flag_val) = opt.flag_value {
                         values.push(flag_val.clone());
                     } else {
                         values.push(String::new());
                     }
-                    Some(Arc::new(values) as Arc<dyn std::any::Any + Send + Sync>)
-                } else {
-                    Some(Arc::new(v.clone()))
                 }
+                Some(convert_multi(&values)?)
             }
-            Some(ParsedValue::Count(n)) => Some(Arc::new(*n)),
-            Some(ParsedValue::Flag(b)) => Some(Arc::new(*b)),
             Some(ParsedValue::FlagNeedsValue) => {
-                // Option was used as a flag without a value.
-                // Use the flag_value if available, then default.
-                // For type consistency, always store String (use empty string as last resort).
-                if let Some(ref flag_val) = opt.flag_value {
-                    Some(Arc::new(flag_val.clone()) as Arc<dyn std::any::Any + Send + Sync>)
-                } else if let Some(ref default) = opt.default {
-                    Some(Arc::new(default.clone()) as Arc<dyn std::any::Any + Send + Sync>)
-                } else {
-                    // No flag_value or default - store empty string to indicate presence
-                    // This keeps type consistent (always String for this option type)
-                    Some(Arc::new(String::new()) as Arc<dyn std::any::Any + Send + Sync>)
-                }
+                let fallback = opt
+                    .flag_value
+                    .as_ref()
+                    .or(opt.default.as_ref())
+                    .cloned()
+                    .unwrap_or_else(String::new);
+                Some(convert_single(&fallback)?)
             }
             Some(ParsedValue::Unset) | None => {
-                // Try to get default value
-                opt.default.as_ref().map(|d| Arc::new(d.clone()) as Arc<dyn std::any::Any + Send + Sync>)
+                if opt.count {
+                    Some(Arc::new(0usize))
+                } else if let Some(ref default) = opt.default {
+                    if opt.nargs().is_multi() || opt.multiple() {
+                        Some(convert_multi(&vec![default.clone()])?)
+                    } else {
+                        Some(convert_single(default)?)
+                    }
+                } else {
+                    None
+                }
             }
         };
 
@@ -556,15 +580,46 @@ impl Command {
         let name = arg.name();
         let parsed_value = opts.get(name);
 
+        let make_error_ctx = || {
+            ErrorContext::new()
+                .with_command_path(ctx.command_path())
+                .with_usage(self.get_usage(ctx))
+                .with_help_options(ctx.help_option_names().to_vec())
+        };
+
+        let convert_single = |value: &str| -> Result<Arc<dyn std::any::Any + Send + Sync>, ClickError> {
+            arg.convert_any(value)
+                .map(Arc::from)
+                .map_err(|msg| {
+                    ClickError::bad_parameter_named(msg, arg.human_readable_name())
+                        .with_context(make_error_ctx())
+                })
+        };
+
+        let convert_multi = |values: &[String]| -> Result<Arc<dyn std::any::Any + Send + Sync>, ClickError> {
+            arg.type_converter()
+                .convert_multi(values)
+                .map(Arc::from)
+                .map_err(|msg| {
+                    ClickError::bad_parameter_named(msg, arg.human_readable_name())
+                        .with_context(make_error_ctx())
+                })
+        };
+
         // Convert ParsedValue to a boxed value for storage
         let value: Option<Arc<dyn std::any::Any + Send + Sync>> = match parsed_value {
-            Some(ParsedValue::Single(s)) => Some(Arc::new(s.clone())),
-            Some(ParsedValue::Multiple(v)) => Some(Arc::new(v.clone())),
+            Some(ParsedValue::Single(s)) => Some(convert_single(s)?),
+            Some(ParsedValue::Multiple(v)) => Some(convert_multi(v)?),
             Some(ParsedValue::Count(n)) => Some(Arc::new(*n)),
             Some(ParsedValue::Flag(b)) => Some(Arc::new(*b)),
             Some(ParsedValue::FlagNeedsValue) | Some(ParsedValue::Unset) | None => {
-                // Try to get default value
-                arg.default_value().map(|d| Arc::new(d.to_string()) as Arc<dyn std::any::Any + Send + Sync>)
+                arg.default_value().map(|d| {
+                    if arg.nargs().is_multi() || arg.multiple() {
+                        convert_multi(&vec![d.to_string()]).map_err(|e| e)
+                    } else {
+                        convert_single(d).map_err(|e| e)
+                    }
+                }).transpose()?
             }
         };
 
@@ -1079,6 +1134,7 @@ fn make_help_option(names: &[String]) -> ClickOption {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::INT;
 
     #[test]
     fn test_command_creation_defaults() {
@@ -1402,6 +1458,20 @@ mod tests {
     }
 
     #[test]
+    fn test_option_type_conversion() {
+        let cmd = Command::new("test")
+            .option(ClickOption::new(&["--count"]).type_any(INT).build())
+            .build();
+
+        let ctx = cmd.make_context("test", vec!["--count".to_string(), "42".to_string()], None);
+        assert!(ctx.is_ok());
+
+        let ctx = ctx.unwrap();
+        let count = ctx.get_param::<i64>("count");
+        assert_eq!(count, Some(&42));
+    }
+
+    #[test]
     fn test_option_with_default() {
         let cmd = Command::new("greet")
             .option(
@@ -1418,6 +1488,30 @@ mod tests {
         let ctx = ctx.unwrap();
         let name = ctx.get_param::<String>("name");
         assert_eq!(name, Some(&"World".to_string()));
+    }
+
+    #[test]
+    fn test_argument_type_conversion() {
+        let cmd = Command::new("greet")
+            .argument(Argument::new("count").type_(INT).build())
+            .build();
+
+        let ctx = cmd.make_context("greet", vec!["7".to_string()], None);
+        assert!(ctx.is_ok());
+
+        let ctx = ctx.unwrap();
+        let count = ctx.get_param::<i64>("count");
+        assert_eq!(count, Some(&7));
+    }
+
+    #[test]
+    fn test_argument_type_conversion_error() {
+        let cmd = Command::new("greet")
+            .argument(Argument::new("count").type_(INT).build())
+            .build();
+
+        let ctx = cmd.make_context("greet", vec!["nope".to_string()], None);
+        assert!(matches!(ctx, Err(ClickError::BadParameter { .. })));
     }
 
     #[test]

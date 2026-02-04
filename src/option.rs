@@ -8,10 +8,13 @@
 //!
 //! Based on Python Click's `core.py:Option` class (line 2641+).
 
+use std::any::Any;
 use std::fmt;
+use std::sync::Arc;
 
 use crate::parameter::{Nargs, Parameter, ParameterConfig};
-use crate::types::{TypeConverter, STRING};
+use crate::argument::AnyTypeConverter;
+use crate::types::{StringType, TypeConverter, STRING};
 
 // =============================================================================
 // Option Name Parsing
@@ -173,6 +176,8 @@ pub struct ClickOption {
     type_name: String,
     /// Type metavar (for help text).
     type_metavar: Option<String>,
+    /// Type converter (type-erased).
+    type_converter: Arc<dyn AnyTypeConverter>,
 }
 
 impl fmt::Debug for ClickOption {
@@ -193,6 +198,7 @@ impl fmt::Debug for ClickOption {
             .field("show_envvar", &self.show_envvar)
             .field("default", &self.default)
             .field("type_name", &self.type_name)
+            .field("has_type_converter", &true)
             .finish()
     }
 }
@@ -229,6 +235,23 @@ impl ClickOption {
             .or(self.short.first())
             .map(|s| s.as_str())
             .unwrap_or("")
+    }
+
+    /// Get the type converter for this option.
+    pub fn type_converter(&self) -> &dyn AnyTypeConverter {
+        self.type_converter.as_ref()
+    }
+
+    /// Convert a string value using this option's type converter.
+    /// Returns the converted value as a boxed Any type.
+    pub fn convert_any(&self, value: &str) -> Result<Box<dyn Any + Send + Sync>, String> {
+        self.type_converter.convert_any(value)
+    }
+
+    /// Convert multiple string values using this option's type converter.
+    /// Returns the converted value as a boxed Any type.
+    pub fn convert_multi(&self, values: &[String]) -> Result<Box<dyn Any + Send + Sync>, String> {
+        self.type_converter.convert_multi(values)
     }
 }
 
@@ -280,6 +303,9 @@ impl Parameter for ClickOption {
         }
         // Otherwise use type's metavar
         if let Some(ref mv) = self.type_metavar {
+            if mv.contains('|') && !(mv.starts_with('[') && mv.ends_with(']')) {
+                return Some(format!("[{}]", mv));
+            }
             return Some(mv.clone());
         }
         if !self.type_name.is_empty() {
@@ -388,6 +414,7 @@ pub struct OptionBuilder {
     metavar: Option<String>,
     type_name: String,
     type_metavar: Option<String>,
+    type_converter: Option<Arc<dyn AnyTypeConverter>>,
     nargs: Nargs,
 }
 
@@ -423,8 +450,9 @@ impl OptionBuilder {
             show_default: false,
             show_envvar: false,
             metavar: None,
-            type_name: STRING.name().to_string(),
-            type_metavar: STRING.get_metavar(),
+            type_name: TypeConverter::name(&STRING).to_string(),
+            type_metavar: TypeConverter::get_metavar(&STRING),
+            type_converter: None,
             nargs: Nargs::Count(1),
         }
     }
@@ -553,16 +581,18 @@ impl OptionBuilder {
     ) -> Self {
         self.type_name = type_.name().to_string();
         self.type_metavar = type_.get_metavar();
+        self.type_converter = Some(Arc::new(type_));
         self
     }
 
     /// Set the type using any TypeConverter (storing name and metavar).
-    pub fn type_any<V, T: TypeConverter<Value = V> + Send + Sync + 'static>(
+    pub fn type_any<V: Send + Sync + 'static, T: TypeConverter<Value = V> + Send + Sync + 'static>(
         mut self,
         type_: T,
     ) -> Self {
         self.type_name = type_.name().to_string();
         self.type_metavar = type_.get_metavar();
+        self.type_converter = Some(Arc::new(type_));
         self
     }
 
@@ -588,6 +618,9 @@ impl OptionBuilder {
             deprecated: None,
         };
 
+        let type_converter: Arc<dyn AnyTypeConverter> =
+            self.type_converter.unwrap_or_else(|| Arc::new(StringType));
+
         ClickOption {
             config,
             long: self.long,
@@ -605,6 +638,7 @@ impl OptionBuilder {
             default: self.default,
             type_name: self.type_name,
             type_metavar: self.type_metavar,
+            type_converter,
         }
     }
 }

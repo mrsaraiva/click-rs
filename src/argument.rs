@@ -43,6 +43,11 @@ pub trait AnyTypeConverter: Send + Sync {
     /// Convert a string value to the target type, returning as Box<dyn Any>.
     fn convert_any(&self, value: &str) -> Result<Box<dyn Any + Send + Sync>, String>;
 
+    /// Convert multiple string values to the target type, returning as Box<dyn Any>.
+    ///
+    /// By default this returns a Vec of the underlying type.
+    fn convert_multi(&self, values: &[String]) -> Result<Box<dyn Any + Send + Sync>, String>;
+
     /// Returns the metavar for this type.
     fn get_metavar(&self) -> Option<String>;
 
@@ -61,6 +66,14 @@ where
 
     fn convert_any(&self, value: &str) -> Result<Box<dyn Any + Send + Sync>, String> {
         self.convert(value).map(|v| Box::new(v) as Box<dyn Any + Send + Sync>)
+    }
+
+    fn convert_multi(&self, values: &[String]) -> Result<Box<dyn Any + Send + Sync>, String> {
+        let mut converted = Vec::with_capacity(values.len());
+        for value in values {
+            converted.push(self.convert(value)?);
+        }
+        Ok(Box::new(converted))
     }
 
     fn get_metavar(&self) -> Option<String> {
