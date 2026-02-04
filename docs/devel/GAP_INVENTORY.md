@@ -35,7 +35,7 @@ and every unintentional divergence should be turned into a tracked task.
 | GAP-PARAM-003 | Parameters | Option prompting (`prompt`, `confirmation_prompt`, `hide_input`) is defined but never invoked. | Medium | Done | Invoke `termui::prompt` for missing option values (non-flag, non-count, non-resilient). |
 | GAP-PARAM-004 | Parameters | Per-parameter callbacks (Click’s `callback=`) are not supported. | Medium | Done | Added parameter callbacks and invocation after conversion with tests. |
 | GAP-CTX-001 | Context | `default_map` does not inherit from parent context. | Medium | Done | Implemented parent->child default_map inheritance and parsing usage with tests. |
-| GAP-CTX-002 | Context | `parameter_source` is not populated during parsing. | Medium | Open | Set `ParameterSource` based on CLI/env/default/default_map/prompt. |
+| GAP-CTX-002 | Context | `parameter_source` is not populated during parsing. | Medium | Done | Populate `ParameterSource` for CLI/env/default/default_map/prompt with tests. |
 
 ## Adding a New Gap
 
