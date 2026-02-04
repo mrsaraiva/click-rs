@@ -48,6 +48,7 @@ use crate::error::{ClickError, ErrorContext};
 use crate::option::ClickOption;
 use crate::parameter::{Nargs, Parameter};
 use crate::parser::{OptionAction, OptionParser, ParsedValue, NARGS_OPTIONAL};
+use crate::termui;
 
 // =============================================================================
 // CommandCallback Type
@@ -584,6 +585,36 @@ impl Command {
                         }
                     } else {
                         Some(convert_single(&envval)?)
+                    }
+                } else if let Some(ref prompt_text) = opt.prompt {
+                    if ctx.resilient_parsing() || opt.is_flag || opt.count {
+                        None
+                    } else {
+                        let default_value = opt.default.clone();
+                        let prompted = termui::prompt(
+                            prompt_text,
+                            default_value,
+                            opt.hide_input,
+                            opt.confirmation_prompt,
+                            |input| {
+                                match opt.convert_any(input) {
+                                    Ok(any_val) => {
+                                        if let Ok(val) = any_val.downcast::<String>() {
+                                            Ok(*val)
+                                        } else {
+                                            Ok(input.to_string())
+                                        }
+                                    }
+                                    Err(msg) => Err(msg),
+                                }
+                            },
+                        )?;
+
+                        if opt.nargs().is_multi() || opt.multiple() {
+                            Some(convert_multi(&vec![prompted])?)
+                        } else {
+                            Some(convert_single(&prompted)?)
+                        }
                     }
                 } else if opt.count {
                     Some(Arc::new(0usize))
