@@ -48,6 +48,7 @@ use crate::error::{ClickError, ErrorContext};
 use crate::option::ClickOption;
 use crate::parameter::{Nargs, Parameter};
 use crate::parser::{OptionAction, OptionParser, ParsedValue, NARGS_OPTIONAL};
+use crate::source::ParameterSource;
 use crate::termui;
 
 // =============================================================================
@@ -539,10 +540,20 @@ impl Command {
             None
         };
 
+        let mut source: Option<ParameterSource> = None;
         let mut value: Option<Arc<dyn std::any::Any + Send + Sync>> = match parsed_value {
-            Some(ParsedValue::Count(n)) => Some(Arc::new(*n)),
-            Some(ParsedValue::Flag(b)) => Some(Arc::new(*b)),
-            Some(ParsedValue::Single(s)) => Some(convert_single(s)?),
+            Some(ParsedValue::Count(n)) => {
+                source = Some(ParameterSource::CommandLine);
+                Some(Arc::new(*n))
+            }
+            Some(ParsedValue::Flag(b)) => {
+                source = Some(ParameterSource::CommandLine);
+                Some(Arc::new(*b))
+            }
+            Some(ParsedValue::Single(s)) => {
+                source = Some(ParameterSource::CommandLine);
+                Some(convert_single(s)?)
+            }
             Some(ParsedValue::Multiple(v)) => {
                 let mut values = v.clone();
                 if had_flag_needs_value {
@@ -560,6 +571,7 @@ impl Command {
                         values.push(String::new());
                     }
                 }
+                source = Some(ParameterSource::CommandLine);
                 Some(convert_multi(&values)?)
             }
             Some(ParsedValue::FlagNeedsValue) => {
@@ -569,10 +581,12 @@ impl Command {
                     .or(opt.default.as_ref())
                     .cloned()
                     .unwrap_or_else(String::new);
+                source = Some(ParameterSource::CommandLine);
                 Some(convert_single(&fallback)?)
             }
             Some(ParsedValue::Unset) | None => {
                 if let Some(envval) = envvar_value {
+                    source = Some(ParameterSource::Environment);
                     if opt.count {
                         let parsed = envval.parse::<usize>().map_err(|_| {
                             ClickError::bad_parameter_named(
@@ -593,6 +607,7 @@ impl Command {
                         Some(convert_single(&envval)?)
                     }
                 } else if let Some(default_map) = default_map_value {
+                    source = Some(ParameterSource::DefaultMap);
                     Some(default_map)
                 } else if let Some(ref prompt_text) = opt.prompt {
                     if ctx.resilient_parsing() || opt.is_flag || opt.count {
@@ -618,6 +633,7 @@ impl Command {
                             },
                         )?;
 
+                        source = Some(ParameterSource::Prompt);
                         if opt.nargs().is_multi() || opt.multiple() {
                             Some(convert_multi(&vec![prompted])?)
                         } else {
@@ -625,8 +641,10 @@ impl Command {
                         }
                     }
                 } else if opt.count {
+                    source = Some(ParameterSource::Default);
                     Some(Arc::new(0usize))
                 } else if let Some(ref default) = opt.default {
+                    source = Some(ParameterSource::Default);
                     if opt.nargs().is_multi() || opt.multiple() {
                         Some(convert_multi(&vec![default.clone()])?)
                     } else {
@@ -654,8 +672,11 @@ impl Command {
         }
 
         // Store in context if expose_value is true
-        if opt.expose_value() {
-            if let Some(v) = value {
+        if let Some(v) = value {
+            if let Some(source) = source {
+                ctx.set_parameter_source(name, source);
+            }
+            if opt.expose_value() {
                 ctx.params_mut().insert(name.to_string(), v);
             }
         }
@@ -712,13 +733,27 @@ impl Command {
             None
         };
 
+        let mut source: Option<ParameterSource> = None;
         let mut value: Option<Arc<dyn std::any::Any + Send + Sync>> = match parsed_value {
-            Some(ParsedValue::Single(s)) => Some(convert_single(s)?),
-            Some(ParsedValue::Multiple(v)) => Some(convert_multi(v)?),
-            Some(ParsedValue::Count(n)) => Some(Arc::new(*n)),
-            Some(ParsedValue::Flag(b)) => Some(Arc::new(*b)),
+            Some(ParsedValue::Single(s)) => {
+                source = Some(ParameterSource::CommandLine);
+                Some(convert_single(s)?)
+            }
+            Some(ParsedValue::Multiple(v)) => {
+                source = Some(ParameterSource::CommandLine);
+                Some(convert_multi(v)?)
+            }
+            Some(ParsedValue::Count(n)) => {
+                source = Some(ParameterSource::CommandLine);
+                Some(Arc::new(*n))
+            }
+            Some(ParsedValue::Flag(b)) => {
+                source = Some(ParameterSource::CommandLine);
+                Some(Arc::new(*b))
+            }
             Some(ParsedValue::FlagNeedsValue) | Some(ParsedValue::Unset) | None => {
                 if let Some(envval) = envvar_value {
+                    source = Some(ParameterSource::Environment);
                     if arg.nargs().is_multi() || arg.multiple() {
                         let values = arg.type_converter().split_envvar_value(&envval);
                         if values.is_empty() {
@@ -730,10 +765,12 @@ impl Command {
                         Some(convert_single(&envval)?)
                     }
                 } else if let Some(default_map) = default_map_value {
+                    source = Some(ParameterSource::DefaultMap);
                     Some(default_map)
                 } else {
                     arg.default_value()
                         .map(|d| {
+                            source = Some(ParameterSource::Default);
                             if arg.nargs().is_multi() || arg.multiple() {
                                 convert_multi(&vec![d.to_string()]).map_err(|e| e)
                             } else {
@@ -761,8 +798,11 @@ impl Command {
         }
 
         // Store in context if expose_value is true
-        if arg.expose_value() {
-            if let Some(v) = value {
+        if let Some(v) = value {
+            if let Some(source) = source {
+                ctx.set_parameter_source(name, source);
+            }
+            if arg.expose_value() {
                 ctx.params_mut().insert(name.to_string(), v);
             }
         }
@@ -1262,6 +1302,7 @@ fn make_help_option(names: &[String]) -> ClickOption {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::source::ParameterSource;
     use crate::types::INT;
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -1643,6 +1684,7 @@ mod tests {
         let ctx = ctx.unwrap();
         let name = ctx.get_param::<String>("name");
         assert_eq!(name, Some(&"World".to_string()));
+        assert_eq!(ctx.get_parameter_source("name"), Some(ParameterSource::Default));
     }
 
     #[test]
@@ -1664,6 +1706,10 @@ mod tests {
 
         let name = ctx.get_param::<String>("name");
         assert_eq!(name, Some(&"Bob".to_string()));
+        assert_eq!(
+            ctx.get_parameter_source("name"),
+            Some(ParameterSource::DefaultMap)
+        );
     }
 
     #[test]
@@ -1685,6 +1731,10 @@ mod tests {
         let ctx = ctx.unwrap();
         let count = ctx.get_param::<i64>("count");
         assert_eq!(count, Some(&9));
+        assert_eq!(
+            ctx.get_parameter_source("count"),
+            Some(ParameterSource::Environment)
+        );
     }
 
     #[test]
@@ -1699,6 +1749,10 @@ mod tests {
         let ctx = ctx.unwrap();
         let count = ctx.get_param::<i64>("count");
         assert_eq!(count, Some(&7));
+        assert_eq!(
+            ctx.get_parameter_source("count"),
+            Some(ParameterSource::CommandLine)
+        );
     }
 
     #[test]
