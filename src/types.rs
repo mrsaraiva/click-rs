@@ -831,11 +831,6 @@ impl TypeConverter for Choice {
         }
     }
 
-    fn get_metavar(&self) -> Option<String> {
-        let choices_str = self.choices.join("|");
-        Some(format!("[{}]", choices_str))
-    }
-
     fn get_missing_message(&self) -> Option<String> {
         Some(format!("Choose from:\n\t{}", self.choices.join(",\n\t")))
     }
@@ -850,6 +845,13 @@ impl TypeConverter for Choice {
             })
             .map(|choice| CompletionItem::new(choice.clone()))
             .collect()
+    }
+
+    fn get_metavar(&self) -> Option<String> {
+        if self.choices.is_empty() {
+            return Some("CHOICE".to_string());
+        }
+        Some(self.choices.join("|"))
     }
 }
 

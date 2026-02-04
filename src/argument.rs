@@ -210,10 +210,18 @@ impl Argument {
     /// Note: Unlike options, arguments use their name (uppercase) by default,
     /// not the type's metavar. This matches Python Click's behavior.
     pub fn make_metavar(&self) -> String {
-        // For arguments, the name takes precedence over type metavar
-        // (Python Click: var = self.name.upper() if not self.metavar)
         let mut var = if let Some(metavar) = &self.config.metavar {
             metavar.clone()
+        } else if let Some(type_metavar) = self.type_converter.get_metavar() {
+            if type_metavar.contains('|') {
+                if type_metavar.contains('{') || type_metavar.contains('}') {
+                    type_metavar
+                } else {
+                    format!("{{{}}}", type_metavar)
+                }
+            } else {
+                self.config.name.to_uppercase()
+            }
         } else {
             self.config.name.to_uppercase()
         };

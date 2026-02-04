@@ -279,7 +279,13 @@ impl Parameter for ClickOption {
             return Some(mv.clone());
         }
         // Otherwise use type's metavar
-        self.type_metavar.clone()
+        if let Some(ref mv) = self.type_metavar {
+            return Some(mv.clone());
+        }
+        if !self.type_name.is_empty() {
+            return Some(self.type_name.clone());
+        }
+        None
     }
 
     fn get_help_record(&self) -> Option<(String, String)> {

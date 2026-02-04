@@ -115,9 +115,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `expand_path()` with tilde and environment variable expansion
     - `format_filename()` for path shortening with tilde
     - `get_text_stdout()`, `get_text_stderr()`, `get_binary_stdout()` for stream access
-    - `get_os_args()` for CLI arguments
-    - `safecall()` for exception-safe function calls
-    - `should_strip_ansi()` for ANSI output detection
+- `get_os_args()` for CLI arguments
+- `safecall()` for exception-safe function calls
+- `should_strip_ansi()` for ANSI output detection
+
+### Fixed
+- Option metavar fallback now uses type name when no explicit metavar is provided.
+- Choice metavar rendering for help/usage (brace-wrapped in usage when appropriate).
   - 302 unit tests + 239 integration/doc tests (541 total)
 
 ### Known Limitations (v1.0)
