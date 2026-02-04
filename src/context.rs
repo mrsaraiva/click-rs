@@ -685,6 +685,14 @@ impl Context {
             .map(|v| v.as_ref() as &dyn Any)
     }
 
+    /// Look up a default value from the default_map and return the stored Arc.
+    pub fn lookup_default_value(&self, name: &str) -> Option<BoxedValue> {
+        self.default_map
+            .as_ref()
+            .and_then(|map| map.get(name))
+            .cloned()
+    }
+
     /// Programmatically invoke another command with the given arguments.
     ///
     /// This creates a child context for the invoked command and runs it.
@@ -1089,11 +1097,19 @@ impl ContextBuilder {
             None
         };
 
-        // Use provided default_map, or None.
-        // Note: Python Click supports nested default_map inheritance from parent,
-        // but this requires complex type handling in Rust. For now, each context
-        // should have its own default_map if needed.
-        let default_map = self.default_map;
+        // Inherit default_map from parent, with child overrides.
+        let parent_default_map = self.parent.as_ref().and_then(|parent| parent.default_map.clone());
+        let default_map = match (parent_default_map, self.default_map) {
+            (Some(mut inherited), Some(child)) => {
+                for (key, value) in child {
+                    inherited.insert(key, value);
+                }
+                Some(inherited)
+            }
+            (Some(inherited), None) => Some(inherited),
+            (None, Some(child)) => Some(child),
+            (None, None) => None,
+        };
 
         Context {
             parent: self.parent,
@@ -1380,6 +1396,32 @@ mod tests {
         );
 
         assert!(ctx.lookup_default("missing").is_none());
+    }
+
+    #[test]
+    fn test_default_map_inheritance() {
+        let mut parent_defaults: HashMap<String, BoxedValue> = HashMap::new();
+        parent_defaults.insert("count".to_string(), Arc::new(5i32));
+
+        let parent = Arc::new(ContextBuilder::new().default_map(parent_defaults).build());
+
+        let mut child_defaults: HashMap<String, BoxedValue> = HashMap::new();
+        child_defaults.insert("count".to_string(), Arc::new(10i32));
+        child_defaults.insert("name".to_string(), Arc::new("Bob".to_string()));
+
+        let child = ContextBuilder::new()
+            .parent(Arc::clone(&parent))
+            .default_map(child_defaults)
+            .build();
+
+        let count_default = child.lookup_default("count").unwrap();
+        assert_eq!(count_default.downcast_ref::<i32>(), Some(&10));
+
+        let name_default = child.lookup_default("name").unwrap();
+        assert_eq!(
+            name_default.downcast_ref::<String>(),
+            Some(&"Bob".to_string())
+        );
     }
 
     #[test]

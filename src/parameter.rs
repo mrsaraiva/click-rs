@@ -173,8 +173,8 @@ pub trait Parameter: Send + Sync + fmt::Debug {
 /// Receives the current context, the parameter, and the converted value.
 /// Returns the (possibly transformed) value or an error.
 pub type ParameterCallback = Arc<
-    dyn Fn(&Context, &dyn Parameter, Box<dyn Any + Send + Sync>)
-            -> Result<Box<dyn Any + Send + Sync>, ClickError>
+    dyn Fn(&Context, &dyn Parameter, Arc<dyn Any + Send + Sync>)
+            -> Result<Arc<dyn Any + Send + Sync>, ClickError>
         + Send
         + Sync,
 >;

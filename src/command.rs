@@ -508,16 +508,18 @@ impl Command {
                 .with_help_options(ctx.help_option_names().to_vec())
         };
 
-        let convert_single = |value: &str| -> Result<Box<dyn std::any::Any + Send + Sync>, ClickError> {
+        let convert_single = |value: &str| -> Result<Arc<dyn std::any::Any + Send + Sync>, ClickError> {
             opt.convert_any(value)
+                .map(Arc::from)
                 .map_err(|msg| {
                     ClickError::bad_parameter_named(msg, opt.human_readable_name())
                         .with_context(make_error_ctx())
                 })
         };
 
-        let convert_multi = |values: &[String]| -> Result<Box<dyn std::any::Any + Send + Sync>, ClickError> {
+        let convert_multi = |values: &[String]| -> Result<Arc<dyn std::any::Any + Send + Sync>, ClickError> {
             opt.convert_multi(values)
+                .map(Arc::from)
                 .map_err(|msg| {
                     ClickError::bad_parameter_named(msg, opt.human_readable_name())
                         .with_context(make_error_ctx())
@@ -531,9 +533,15 @@ impl Command {
             None
         };
 
-        let mut value: Option<Box<dyn std::any::Any + Send + Sync>> = match parsed_value {
-            Some(ParsedValue::Count(n)) => Some(Box::new(*n)),
-            Some(ParsedValue::Flag(b)) => Some(Box::new(*b)),
+        let default_map_value = if matches!(parsed_value, Some(ParsedValue::Unset) | None) {
+            ctx.lookup_default_value(name)
+        } else {
+            None
+        };
+
+        let mut value: Option<Arc<dyn std::any::Any + Send + Sync>> = match parsed_value {
+            Some(ParsedValue::Count(n)) => Some(Arc::new(*n)),
+            Some(ParsedValue::Flag(b)) => Some(Arc::new(*b)),
             Some(ParsedValue::Single(s)) => Some(convert_single(s)?),
             Some(ParsedValue::Multiple(v)) => {
                 let mut values = v.clone();
@@ -573,7 +581,7 @@ impl Command {
                             )
                             .with_context(make_error_ctx())
                         })?;
-                        Some(Box::new(parsed))
+                        Some(Arc::new(parsed))
                     } else if opt.nargs().is_multi() || opt.multiple() {
                         let values = opt.type_converter().split_envvar_value(&envval);
                         if values.is_empty() {
@@ -584,6 +592,8 @@ impl Command {
                     } else {
                         Some(convert_single(&envval)?)
                     }
+                } else if let Some(default_map) = default_map_value {
+                    Some(default_map)
                 } else if let Some(ref prompt_text) = opt.prompt {
                     if ctx.resilient_parsing() || opt.is_flag || opt.count {
                         None
@@ -615,7 +625,7 @@ impl Command {
                         }
                     }
                 } else if opt.count {
-                    Some(Box::new(0usize))
+                    Some(Arc::new(0usize))
                 } else if let Some(ref default) = opt.default {
                     if opt.nargs().is_multi() || opt.multiple() {
                         Some(convert_multi(&vec![default.clone()])?)
@@ -646,7 +656,7 @@ impl Command {
         // Store in context if expose_value is true
         if opt.expose_value() {
             if let Some(v) = value {
-                ctx.params_mut().insert(name.to_string(), Arc::from(v));
+                ctx.params_mut().insert(name.to_string(), v);
             }
         }
 
@@ -676,17 +686,19 @@ impl Command {
                 .with_help_options(ctx.help_option_names().to_vec())
         };
 
-        let convert_single = |value: &str| -> Result<Box<dyn std::any::Any + Send + Sync>, ClickError> {
+        let convert_single = |value: &str| -> Result<Arc<dyn std::any::Any + Send + Sync>, ClickError> {
             arg.convert_any(value)
+                .map(Arc::from)
                 .map_err(|msg| {
                     ClickError::bad_parameter_named(msg, arg.human_readable_name())
                         .with_context(make_error_ctx())
                 })
         };
 
-        let convert_multi = |values: &[String]| -> Result<Box<dyn std::any::Any + Send + Sync>, ClickError> {
+        let convert_multi = |values: &[String]| -> Result<Arc<dyn std::any::Any + Send + Sync>, ClickError> {
             arg.type_converter()
                 .convert_multi(values)
+                .map(Arc::from)
                 .map_err(|msg| {
                     ClickError::bad_parameter_named(msg, arg.human_readable_name())
                         .with_context(make_error_ctx())
@@ -694,11 +706,17 @@ impl Command {
         };
 
         // Convert ParsedValue to a boxed value for storage
-        let mut value: Option<Box<dyn std::any::Any + Send + Sync>> = match parsed_value {
+        let default_map_value = if matches!(parsed_value, Some(ParsedValue::Unset) | None) {
+            ctx.lookup_default_value(name)
+        } else {
+            None
+        };
+
+        let mut value: Option<Arc<dyn std::any::Any + Send + Sync>> = match parsed_value {
             Some(ParsedValue::Single(s)) => Some(convert_single(s)?),
             Some(ParsedValue::Multiple(v)) => Some(convert_multi(v)?),
-            Some(ParsedValue::Count(n)) => Some(Box::new(*n)),
-            Some(ParsedValue::Flag(b)) => Some(Box::new(*b)),
+            Some(ParsedValue::Count(n)) => Some(Arc::new(*n)),
+            Some(ParsedValue::Flag(b)) => Some(Arc::new(*b)),
             Some(ParsedValue::FlagNeedsValue) | Some(ParsedValue::Unset) | None => {
                 if let Some(envval) = envvar_value {
                     if arg.nargs().is_multi() || arg.multiple() {
@@ -711,6 +729,8 @@ impl Command {
                     } else {
                         Some(convert_single(&envval)?)
                     }
+                } else if let Some(default_map) = default_map_value {
+                    Some(default_map)
                 } else {
                     arg.default_value()
                         .map(|d| {
@@ -743,7 +763,7 @@ impl Command {
         // Store in context if expose_value is true
         if arg.expose_value() {
             if let Some(v) = value {
-                ctx.params_mut().insert(name.to_string(), Arc::from(v));
+                ctx.params_mut().insert(name.to_string(), v);
             }
         }
 
@@ -1243,6 +1263,8 @@ fn make_help_option(names: &[String]) -> ClickOption {
 mod tests {
     use super::*;
     use crate::types::INT;
+    use std::collections::HashMap;
+    use std::sync::Arc;
 
     #[test]
     fn test_command_creation_defaults() {
@@ -1587,9 +1609,10 @@ mod tests {
                     .type_any(INT)
                     .callback(|_ctx, _param, value| {
                         let count = *value
-                            .downcast::<i64>()
-                            .map_err(|_| ClickError::bad_parameter("bad callback value"))?;
-                        Ok(Box::new(count + 1))
+                            .as_ref()
+                            .downcast_ref::<i64>()
+                            .ok_or_else(|| ClickError::bad_parameter("bad callback value"))?;
+                        Ok(Arc::new(count + 1))
                     })
                     .build(),
             )
@@ -1620,6 +1643,27 @@ mod tests {
         let ctx = ctx.unwrap();
         let name = ctx.get_param::<String>("name");
         assert_eq!(name, Some(&"World".to_string()));
+    }
+
+    #[test]
+    fn test_option_default_map_value() {
+        let cmd = Command::new("greet")
+            .option(ClickOption::new(&["--name"]).build())
+            .build();
+
+        let mut defaults: HashMap<String, Arc<dyn std::any::Any + Send + Sync>> = HashMap::new();
+        defaults.insert("name".to_string(), Arc::new("Bob".to_string()));
+
+        let mut ctx = ContextBuilder::new()
+            .info_name("greet")
+            .default_map(defaults)
+            .build();
+
+        let result = cmd.parse_args(&mut ctx, vec![]);
+        assert!(result.is_ok());
+
+        let name = ctx.get_param::<String>("name");
+        assert_eq!(name, Some(&"Bob".to_string()));
     }
 
     #[test]
@@ -1665,9 +1709,10 @@ mod tests {
                     .type_(INT)
                     .callback(|_ctx, _param, value| {
                         let count = *value
-                            .downcast::<i64>()
-                            .map_err(|_| ClickError::bad_parameter("bad callback value"))?;
-                        Ok(Box::new(count * 2))
+                            .as_ref()
+                            .downcast_ref::<i64>()
+                            .ok_or_else(|| ClickError::bad_parameter("bad callback value"))?;
+                        Ok(Arc::new(count * 2))
                     })
                     .build(),
             )
@@ -1704,6 +1749,27 @@ mod tests {
         let ctx = ctx.unwrap();
         let name = ctx.get_param::<String>("name");
         assert_eq!(name, Some(&"World".to_string()));
+    }
+
+    #[test]
+    fn test_argument_default_map_value() {
+        let cmd = Command::new("greet")
+            .argument(Argument::new("name").build())
+            .build();
+
+        let mut defaults: HashMap<String, Arc<dyn std::any::Any + Send + Sync>> = HashMap::new();
+        defaults.insert("name".to_string(), Arc::new("Alice".to_string()));
+
+        let mut ctx = ContextBuilder::new()
+            .info_name("greet")
+            .default_map(defaults)
+            .build();
+
+        let result = cmd.parse_args(&mut ctx, vec![]);
+        assert!(result.is_ok());
+
+        let name = ctx.get_param::<String>("name");
+        assert_eq!(name, Some(&"Alice".to_string()));
     }
 
     #[test]

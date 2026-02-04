@@ -433,8 +433,8 @@ impl ArgumentBuilder {
     /// Set a callback invoked after conversion.
     pub fn callback<F>(mut self, callback: F) -> Self
     where
-        F: Fn(&Context, &dyn Parameter, Box<dyn Any + Send + Sync>)
-                -> Result<Box<dyn Any + Send + Sync>, ClickError>
+        F: Fn(&Context, &dyn Parameter, Arc<dyn Any + Send + Sync>)
+                -> Result<Arc<dyn Any + Send + Sync>, ClickError>
             + Send
             + Sync
             + 'static,
