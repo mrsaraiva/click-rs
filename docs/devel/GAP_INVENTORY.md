@@ -32,7 +32,7 @@ and every unintentional divergence should be turned into a tracked task.
 | GAP-CI-001 | CI parity | CI runs `cargo test` on Linux/macOS/Windows; parity runner is not part of CI by default. | Low | Planned | Add an optional parity job (Linux) with pinned Click, or document as a local-only check. |
 | GAP-PARAM-001 | Parameters | Type conversion is not applied during parsing; `Argument`/`ClickOption` values are stored as raw strings. | High | Done | Wired `TypeConverter` into `Command` parsing with error handling and tests. |
 | GAP-PARAM-002 | Parameters | Envvar resolution (including `auto_envvar_prefix`) is not applied when values are missing. | High | Done | Implemented envvar lookup (explicit + auto prefix), splitting, and added tests. |
-| GAP-PARAM-003 | Parameters | Option prompting (`prompt`, `confirmation_prompt`, `hide_input`) is defined but never invoked. | Medium | Open | Invoke `termui::prompt` when option values are missing and prompting is configured. |
+| GAP-PARAM-003 | Parameters | Option prompting (`prompt`, `confirmation_prompt`, `hide_input`) is defined but never invoked. | Medium | Done | Invoke `termui::prompt` for missing option values (non-flag, non-count, non-resilient). |
 | GAP-PARAM-004 | Parameters | Per-parameter callbacks (Click’s `callback=`) are not supported. | Medium | Open | Add optional callbacks to `ParameterConfig` and invoke after conversion. |
 | GAP-CTX-001 | Context | `default_map` does not inherit from parent context. | Medium | Open | Implement parent->child default_map inheritance similar to Click. |
 | GAP-CTX-002 | Context | `parameter_source` is not populated during parsing. | Medium | Open | Set `ParameterSource` based on CLI/env/default/default_map/prompt. |
