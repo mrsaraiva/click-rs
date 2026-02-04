@@ -41,6 +41,7 @@ use std::thread;
 use std::os::unix::io::{FromRawFd, RawFd};
 
 use crate::group::CommandLike;
+use encoding_rs::Encoding;
 
 #[derive(Debug)]
 enum CaptureOutcome {
@@ -400,6 +401,9 @@ pub struct CliRunner {
     /// `InvokeResult { exit_code: 1, exception_message: Some(...) }`.
     catch_panics: bool,
 
+    /// Output charset for decoding captured bytes.
+    charset: String,
+
 }
 
 impl CliRunner {
@@ -419,6 +423,7 @@ impl CliRunner {
             echo_stdin: false,
             mix_stderr: true,
             catch_panics: true,
+            charset: "utf-8".to_string(),
         }
     }
 
@@ -468,6 +473,14 @@ impl CliRunner {
     /// Set whether panics should be captured as a failure instead of re-panicking.
     pub fn catch_panics(mut self, catch: bool) -> Self {
         self.catch_panics = catch;
+        self
+    }
+
+    /// Set the charset used to decode captured output.
+    ///
+    /// Defaults to `"utf-8"`. Unknown labels fall back to UTF-8.
+    pub fn charset(mut self, charset: impl Into<String>) -> Self {
+        self.charset = charset.into();
         self
     }
 
@@ -579,8 +592,18 @@ impl CliRunner {
             }
         };
 
-        let mut stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
-        let stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
+        let label = self.charset.trim().to_lowercase();
+        let encoding = Encoding::for_label(label.as_bytes())
+            .or_else(|| {
+                if label == "latin-1" || label == "latin1" {
+                    Encoding::for_label(b"iso-8859-1")
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(encoding_rs::UTF_8);
+        let mut stdout = encoding.decode(&stdout_bytes).0.into_owned();
+        let stderr = encoding.decode(&stderr_bytes).0.into_owned();
 
         // Echo stdin into stdout like Python Click's CliRunner when enabled.
         if self.echo_stdin && !input_str.is_empty() {

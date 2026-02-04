@@ -4,6 +4,7 @@ use click::command::Command;
 use click::error::ClickError;
 use click::option::ClickOption;
 use click::testing::{make_test_context, CliRunner, InvokeResult, IsolatedFilesystem};
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -61,6 +62,23 @@ fn test_cli_runner_mix_stderr() {
     let runner_mixed = CliRunner::new().mix_stderr(true);
     let runner_separate = CliRunner::new().mix_stderr(false);
     let _ = (runner_mixed, runner_separate);
+}
+
+#[test]
+fn test_cli_runner_charset_decoding() {
+    let cmd = Command::new("latin")
+        .callback(|_ctx| {
+            let mut out = std::io::stdout();
+            out.write_all(&[0xE9]).unwrap(); // "é" in latin-1
+            Ok(())
+        })
+        .build();
+
+    let runner = CliRunner::new().charset("latin-1");
+    let result = runner.invoke(&cmd, &[]);
+
+    assert_eq!(result.exit_code, 0);
+    assert!(result.output.contains('é'));
 }
 
 #[test]
