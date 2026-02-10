@@ -1,3 +1,4 @@
+#![warn(unsafe_code)]
 //! click-rs: A Rust port of Python's Click library for creating command-line interfaces.
 //!
 //! This crate provides a declarative way to build command-line applications with
@@ -7,7 +8,7 @@
 //!
 //! The easiest way to use click-rs is with derive macros (enabled by default):
 //!
-//! ```rust,ignore
+//! ```no_run
 //! use click::Command;
 //!
 //! #[derive(Command)]
@@ -43,7 +44,7 @@
 //!
 //! For more control, use the builder API directly:
 //!
-//! ```rust,ignore
+//! ```no_run
 //! use click::{Command, ClickOption, Argument};
 //!
 //! let cmd = Command::new("greet")

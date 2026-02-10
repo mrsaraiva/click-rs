@@ -629,7 +629,7 @@ pub fn split_arg_string(s: &str) -> Vec<String> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use click::utils::expand_args;
 ///
 /// // Assuming *.txt files exist in the current directory

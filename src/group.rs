@@ -2488,7 +2488,7 @@ mod tests {
             .build();
 
         // Without --help, missing subcommand should fail
-        let ctx = group.make_context("cli", vec![], None);
+        let _ctx = group.make_context("cli", vec![], None);
         // Note: Group doesn't fail in make_context for missing subcommand,
         // it fails in invoke(). So this test verifies --help triggers early.
 

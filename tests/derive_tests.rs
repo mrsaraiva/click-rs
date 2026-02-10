@@ -198,6 +198,7 @@ fn test_count_option() {
 struct DocumentedCmd {
     /// This argument has help from doc comment
     #[argument]
+    #[allow(dead_code)]
     input: String,
 }
 
@@ -216,10 +217,12 @@ fn test_doc_comment_help() {
 struct HiddenCmd {
     /// A visible option
     #[option(long)]
+    #[allow(dead_code)]
     visible: String,
 
     /// A hidden option
     #[option(long, hidden)]
+    #[allow(dead_code)]
     secret: String,
 }
 

@@ -37,9 +37,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 
-#[cfg(unix)]
-use std::os::unix::io::{FromRawFd, RawFd};
-
 use crate::group::CommandLike;
 use encoding_rs::Encoding;
 
@@ -68,41 +65,6 @@ fn restore_env(saved_env: &[(String, Option<String>)]) {
     }
 }
 
-#[cfg(unix)]
-fn pipe() -> io::Result<(RawFd, RawFd)> {
-    let mut fds = [0; 2];
-    let rc = unsafe { libc::pipe(fds.as_mut_ptr()) };
-    if rc == -1 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok((fds[0], fds[1]))
-}
-
-#[cfg(unix)]
-fn dup_fd(fd: RawFd) -> io::Result<RawFd> {
-    let rc = unsafe { libc::dup(fd) };
-    if rc == -1 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(rc)
-}
-
-#[cfg(unix)]
-fn dup2_fd(from: RawFd, to: RawFd) -> io::Result<()> {
-    let rc = unsafe { libc::dup2(from, to) };
-    if rc == -1 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
-}
-
-#[cfg(unix)]
-fn close_fd(fd: RawFd) {
-    unsafe {
-        libc::close(fd);
-    }
-}
-
 /// A global lock used to serialize stdio redirection during output capture.
 ///
 /// Output capture redirects process-global file descriptors, which is not safe
@@ -124,63 +86,58 @@ fn run_with_capture<F>(input: &str, f: F) -> io::Result<(CaptureOutcome, Vec<u8>
 where
     F: FnOnce() -> Result<(), crate::ClickError>,
 {
+    use nix::unistd::{dup, dup2_stderr, dup2_stdin, dup2_stdout};
+
     let _lock = capture_lock();
 
-    // Pipes for stdout/stderr capture.
-    let (out_r, out_w) = pipe()?;
-    let (err_r, err_w) = pipe()?;
+    // Pipes for stdout/stderr/stdin capture (os_pipe: safe, cross-platform).
+    let (out_reader_pipe, out_writer_pipe) = os_pipe::pipe()?;
+    let (err_reader_pipe, err_writer_pipe) = os_pipe::pipe()?;
+    let (in_reader_pipe, in_writer_pipe) = os_pipe::pipe()?;
 
-    // Pipe for stdin (write input, then close write end to send EOF).
-    let (in_r, in_w) = pipe()?;
+    // Save original fds (nix::dup returns OwnedFd with RAII cleanup).
+    let saved_stdin = dup(io::stdin()).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let saved_stdout = dup(io::stdout()).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let saved_stderr = dup(io::stderr()).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
-    // Save original fds.
-    let saved_stdin = dup_fd(0)?;
-    let saved_stdout = dup_fd(1)?;
-    let saved_stderr = dup_fd(2)?;
-
-    // Write input then close stdin write end.
+    // Write input then close stdin write end (PipeWriter Drop closes fd).
     {
-        let mut file = unsafe { fs::File::from_raw_fd(in_w) };
-        let _ = file.write_all(input.as_bytes());
+        let mut writer = in_writer_pipe;
+        let _ = writer.write_all(input.as_bytes());
     }
 
-    // Redirect stdio. From this point on, we must restore on all exit paths.
-    let redir_ok = dup2_fd(in_r, 0)
-        .and_then(|_| dup2_fd(out_w, 1))
-        .and_then(|_| dup2_fd(err_w, 2))
+    // Redirect stdio using nix safe wrappers.
+    let redir_ok = dup2_stdin(&in_reader_pipe)
+        .and_then(|_| dup2_stdout(&out_writer_pipe))
+        .and_then(|_| dup2_stderr(&err_writer_pipe))
         .is_ok();
 
-    // Close unused ends in this thread; fd 0/1/2 now point at redirected targets.
-    close_fd(in_r);
-    close_fd(out_w);
-    close_fd(err_w);
+    // Close pipe ends that have been duped into fd 0/1/2 (RAII Drop).
+    drop(in_reader_pipe);
+    drop(out_writer_pipe);
+    drop(err_writer_pipe);
 
     if !redir_ok {
-        // Restore stdio.
-        let _ = dup2_fd(saved_stdin, 0);
-        let _ = dup2_fd(saved_stdout, 1);
-        let _ = dup2_fd(saved_stderr, 2);
-        close_fd(saved_stdin);
-        close_fd(saved_stdout);
-        close_fd(saved_stderr);
-
+        let _ = dup2_stdin(&saved_stdin);
+        let _ = dup2_stdout(&saved_stdout);
+        let _ = dup2_stderr(&saved_stderr);
         return Err(io::Error::new(
             io::ErrorKind::Other,
             "failed to redirect stdio",
         ));
     }
 
-    // Reader threads (start before running command to avoid pipe buffer deadlocks).
-    let out_reader = thread::spawn(move || {
+    // Reader threads use PipeReader directly (implements Read, no unsafe needed).
+    let out_thread = thread::spawn(move || {
         let mut buf = Vec::new();
-        let mut file = unsafe { fs::File::from_raw_fd(out_r) };
-        let _ = file.read_to_end(&mut buf);
+        let mut reader = out_reader_pipe;
+        let _ = reader.read_to_end(&mut buf);
         buf
     });
-    let err_reader = thread::spawn(move || {
+    let err_thread = thread::spawn(move || {
         let mut buf = Vec::new();
-        let mut file = unsafe { fs::File::from_raw_fd(err_r) };
-        let _ = file.read_to_end(&mut buf);
+        let mut reader = err_reader_pipe;
+        let _ = reader.read_to_end(&mut buf);
         buf
     });
 
@@ -192,16 +149,13 @@ where
     let _ = io::stdout().flush();
     let _ = io::stderr().flush();
 
-    // Restore stdio.
-    let _ = dup2_fd(saved_stdin, 0);
-    let _ = dup2_fd(saved_stdout, 1);
-    let _ = dup2_fd(saved_stderr, 2);
-    close_fd(saved_stdin);
-    close_fd(saved_stdout);
-    close_fd(saved_stderr);
+    // Restore stdio (OwnedFd auto-closes via Drop after dup2).
+    let _ = dup2_stdin(&saved_stdin);
+    let _ = dup2_stdout(&saved_stdout);
+    let _ = dup2_stderr(&saved_stderr);
 
-    let stdout_bytes = out_reader.join().unwrap_or_default();
-    let stderr_bytes = err_reader.join().unwrap_or_default();
+    let stdout_bytes = out_thread.join().unwrap_or_default();
+    let stderr_bytes = err_thread.join().unwrap_or_default();
 
     let outcome = match unwind {
         Ok(r) => CaptureOutcome::Returned(r),
@@ -216,39 +170,29 @@ fn run_with_capture<F>(input: &str, f: F) -> io::Result<(CaptureOutcome, Vec<u8>
 where
     F: FnOnce() -> Result<(), crate::ClickError>,
 {
-    use std::os::windows::io::FromRawHandle;
-    use std::ptr::null_mut;
-    use windows_sys::Win32::Foundation::{
-        CloseHandle, SetHandleInformation, HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE,
-    };
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
     use windows_sys::Win32::System::Console::{
         GetStdHandle, SetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
     };
-    use windows_sys::Win32::System::Pipes::CreatePipe;
 
     let _lock = capture_lock();
 
-    unsafe fn create_pipe_pair() -> io::Result<(HANDLE, HANDLE)> {
-        let mut read_handle: HANDLE = 0;
-        let mut write_handle: HANDLE = 0;
+    // Pipes for stdout/stderr/stdin capture (os_pipe: safe, cross-platform).
+    let (out_reader_pipe, out_writer_pipe) = os_pipe::pipe()?;
+    let (err_reader_pipe, err_writer_pipe) = os_pipe::pipe()?;
+    let (in_reader_pipe, in_writer_pipe) = os_pipe::pipe()?;
 
-        if CreatePipe(&mut read_handle, &mut write_handle, null_mut(), 0) == 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        // Make the read handle non-inheritable.
-        let _ = SetHandleInformation(read_handle, HANDLE_FLAG_INHERIT, 0);
-
-        Ok((read_handle, write_handle))
-    }
-
-    let (out_r, out_w) = unsafe { create_pipe_pair()? };
-    let (err_r, err_w) = unsafe { create_pipe_pair()? };
-    let (in_r, in_w) = unsafe { create_pipe_pair()? };
-
-    let saved_in = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
-    let saved_out = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
-    let saved_err = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
+    // SAFETY: GetStdHandle is a read-only query of the process-global stdio table.
+    // The returned handles are borrowed (not owned) and we only use them to
+    // restore the original state later. IO_CAPTURE_LOCK serializes access.
+    let (saved_in, saved_out, saved_err) = unsafe {
+        (
+            GetStdHandle(STD_INPUT_HANDLE),
+            GetStdHandle(STD_OUTPUT_HANDLE),
+            GetStdHandle(STD_ERROR_HANDLE),
+        )
+    };
 
     if saved_in == 0
         || saved_out == 0
@@ -257,55 +201,45 @@ where
         || saved_out == INVALID_HANDLE_VALUE
         || saved_err == INVALID_HANDLE_VALUE
     {
-        unsafe {
-            CloseHandle(out_r);
-            CloseHandle(out_w);
-            CloseHandle(err_r);
-            CloseHandle(err_w);
-            CloseHandle(in_r);
-            CloseHandle(in_w);
-        }
         return Err(io::Error::new(io::ErrorKind::Other, "GetStdHandle failed"));
     }
 
-    // Write input then close stdin write end.
+    // Write input then close stdin write end (PipeWriter Drop closes handle).
     {
-        let mut file = unsafe { fs::File::from_raw_handle(in_w as *mut std::ffi::c_void) };
-        let _ = file.write_all(input.as_bytes());
+        let mut writer = in_writer_pipe;
+        let _ = writer.write_all(input.as_bytes());
     }
 
-    // Redirect std handles. From this point on, we must restore on all exit paths.
+    // SAFETY: SetStdHandle replaces the process-global stdio handles. This is
+    // serialized by IO_CAPTURE_LOCK, and we restore the original handles in all
+    // exit paths (including panics) before releasing the lock.
     let redir_ok = unsafe {
-        SetStdHandle(STD_INPUT_HANDLE, in_r) != 0
-            && SetStdHandle(STD_OUTPUT_HANDLE, out_w) != 0
-            && SetStdHandle(STD_ERROR_HANDLE, err_w) != 0
+        SetStdHandle(STD_INPUT_HANDLE, in_reader_pipe.as_raw_handle() as _) != 0
+            && SetStdHandle(STD_OUTPUT_HANDLE, out_writer_pipe.as_raw_handle() as _) != 0
+            && SetStdHandle(STD_ERROR_HANDLE, err_writer_pipe.as_raw_handle() as _) != 0
     };
 
     if !redir_ok {
+        // SAFETY: Restoring original handles after failed redirect.
         unsafe {
             let _ = SetStdHandle(STD_INPUT_HANDLE, saved_in);
             let _ = SetStdHandle(STD_OUTPUT_HANDLE, saved_out);
             let _ = SetStdHandle(STD_ERROR_HANDLE, saved_err);
-            CloseHandle(out_r);
-            CloseHandle(out_w);
-            CloseHandle(err_r);
-            CloseHandle(err_w);
-            CloseHandle(in_r);
         }
         return Err(io::Error::last_os_error());
     }
 
-    // Reader threads (start before running command to avoid pipe buffer deadlocks).
-    let out_reader = thread::spawn(move || {
+    // Reader threads use PipeReader directly (implements Read, no unsafe needed).
+    let out_thread = thread::spawn(move || {
         let mut buf = Vec::new();
-        let mut file = unsafe { fs::File::from_raw_handle(out_r as *mut std::ffi::c_void) };
-        let _ = file.read_to_end(&mut buf);
+        let mut reader = out_reader_pipe;
+        let _ = reader.read_to_end(&mut buf);
         buf
     });
-    let err_reader = thread::spawn(move || {
+    let err_thread = thread::spawn(move || {
         let mut buf = Vec::new();
-        let mut file = unsafe { fs::File::from_raw_handle(err_r as *mut std::ffi::c_void) };
-        let _ = file.read_to_end(&mut buf);
+        let mut reader = err_reader_pipe;
+        let _ = reader.read_to_end(&mut buf);
         buf
     });
 
@@ -317,19 +251,21 @@ where
     let _ = io::stdout().flush();
     let _ = io::stderr().flush();
 
+    // SAFETY: Restoring original handles and dropping redirected pipe ends
+    // to signal EOF to reader threads.
     unsafe {
         let _ = SetStdHandle(STD_INPUT_HANDLE, saved_in);
         let _ = SetStdHandle(STD_OUTPUT_HANDLE, saved_out);
         let _ = SetStdHandle(STD_ERROR_HANDLE, saved_err);
-
-        // Close redirected handles to signal EOF to readers.
-        CloseHandle(out_w);
-        CloseHandle(err_w);
-        CloseHandle(in_r);
     }
 
-    let stdout_bytes = out_reader.join().unwrap_or_default();
-    let stderr_bytes = err_reader.join().unwrap_or_default();
+    // Close redirected pipe ends to signal EOF to readers (safe RAII Drop).
+    drop(out_writer_pipe);
+    drop(err_writer_pipe);
+    drop(in_reader_pipe);
+
+    let stdout_bytes = out_thread.join().unwrap_or_default();
+    let stderr_bytes = err_thread.join().unwrap_or_default();
 
     let outcome = match unwind {
         Ok(r) => CaptureOutcome::Returned(r),

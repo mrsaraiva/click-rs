@@ -13,20 +13,20 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```no_run
 //! use click::termui::{echo, secho, style, prompt, confirm, Color};
 //!
 //! // Simple output
 //! echo("Hello, world!", true, false, None);
 //!
 //! // Styled output
-//! secho("Success!", Some(Color::Green), None, true, false, false, false, false, false, false, true, false, None);
+//! secho("Success!", Some(Color::Green), None, true, false, false, false, false, false, false, true, true, false, None);
 //!
 //! // Create a styled string
 //! let styled = style("Error", Some(Color::Red), None, true, false, false, false, false, false, false, false);
 //!
 //! // Prompt for input
-//! let name: String = prompt("Enter your name", Some("Anonymous"), false, false, |s| Ok(s.to_string())).unwrap();
+//! let name = prompt("Enter your name", Some("World".to_string()), false, false, |s| Ok(s.to_string())).unwrap();
 //!
 //! // Confirmation
 //! if confirm("Continue?", Some(true), false).unwrap() {
@@ -50,7 +50,7 @@ use crate::error::{ClickError, Result};
 ///
 /// # Usage
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use click::echo;
 ///
 /// // Simple message with newline
@@ -66,6 +66,7 @@ use crate::error::{ClickError, Result};
 /// echo!("Warning: ", nl = false, err = true);
 ///
 /// // With formatting
+/// let name = "World";
 /// echo!("Hello, {}!", name);
 /// ```
 #[macro_export]
@@ -283,96 +284,11 @@ pub fn get_terminal_size() -> (usize, usize) {
         }
     }
 
-    #[cfg(unix)]
-    {
-        use std::mem::MaybeUninit;
-        use std::os::unix::io::AsRawFd;
-
-        #[repr(C)]
-        struct Winsize {
-            ws_row: u16,
-            ws_col: u16,
-            ws_xpixel: u16,
-            ws_ypixel: u16,
-        }
-
-        // TIOCGWINSZ value varies by platform
-        #[cfg(target_os = "linux")]
-        const TIOCGWINSZ: std::os::raw::c_ulong = 0x5413;
-        #[cfg(target_os = "macos")]
-        const TIOCGWINSZ: std::os::raw::c_ulong = 0x40087468;
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-        const TIOCGWINSZ: std::os::raw::c_ulong = 0x5413; // Default to Linux
-
-        extern "C" {
-            fn ioctl(fd: std::os::raw::c_int, request: std::os::raw::c_ulong, ...) -> std::os::raw::c_int;
-        }
-
-        let fd = std::io::stdout().as_raw_fd();
-        let mut ws = MaybeUninit::<Winsize>::uninit();
-
-        unsafe {
-            if ioctl(fd, TIOCGWINSZ, ws.as_mut_ptr()) == 0 {
-                let ws = ws.assume_init();
-                if ws.ws_col > 0 && ws.ws_row > 0 {
-                    return (ws.ws_col as usize, ws.ws_row as usize);
-                }
-            }
-        }
+    // Use crossterm for OS-level detection (cross-platform, no unsafe)
+    match crossterm::terminal::size() {
+        Ok((cols, rows)) if cols > 0 && rows > 0 => (cols as usize, rows as usize),
+        _ => (80, 24),
     }
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::io::AsRawHandle;
-
-        #[repr(C)]
-        struct Coord {
-            x: i16,
-            y: i16,
-        }
-
-        #[repr(C)]
-        struct SmallRect {
-            left: i16,
-            top: i16,
-            right: i16,
-            bottom: i16,
-        }
-
-        #[repr(C)]
-        struct ConsoleScreenBufferInfo {
-            dw_size: Coord,
-            dw_cursor_position: Coord,
-            w_attributes: u16,
-            sr_window: SmallRect,
-            dw_maximum_window_size: Coord,
-        }
-
-        #[link(name = "kernel32")]
-        extern "system" {
-            fn GetConsoleScreenBufferInfo(
-                hConsoleOutput: *mut std::ffi::c_void,
-                lpConsoleScreenBufferInfo: *mut ConsoleScreenBufferInfo,
-            ) -> std::os::raw::c_int;
-        }
-
-        let handle = std::io::stdout().as_raw_handle();
-        let mut csbi = std::mem::MaybeUninit::<ConsoleScreenBufferInfo>::uninit();
-
-        unsafe {
-            if GetConsoleScreenBufferInfo(handle as *mut _, csbi.as_mut_ptr()) != 0 {
-                let csbi = csbi.assume_init();
-                let width = (csbi.sr_window.right - csbi.sr_window.left + 1) as usize;
-                let height = (csbi.sr_window.bottom - csbi.sr_window.top + 1) as usize;
-                if width > 0 && height > 0 {
-                    return (width, height);
-                }
-            }
-        }
-    }
-
-    // Default fallback
-    (80, 24)
 }
 
 /// Clear the terminal screen.
@@ -608,7 +524,7 @@ pub fn secho(
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use click::termui::echo_via_pager;
 ///
 /// let long_text = (0..100).map(|i| format!("Line {}", i)).collect::<Vec<_>>().join("\n");
@@ -723,9 +639,10 @@ fn which_pager(name: &str) -> Option<String> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use click::termui::launch;
 ///
+/// # fn main() -> Result<(), click::ClickError> {
 /// // Open a URL in the default browser
 /// launch("https://example.com", false, false)?;
 ///
@@ -734,6 +651,8 @@ fn which_pager(name: &str) -> Option<String> {
 ///
 /// // Show file location in file manager
 /// launch("/path/to/file.txt", false, true)?;
+/// # Ok(())
+/// # }
 /// ```
 pub fn launch(url: &str, wait: bool, locate: bool) -> Result<()> {
     let (cmd, args) = get_launch_command(url, locate)?;
@@ -1016,137 +935,44 @@ pub fn confirm(text: &str, default: Option<bool>, abort: bool) -> Result<bool> {
 /// If raw mode is unavailable, it falls back to reading a line and returning
 /// the first character.
 pub fn getchar(echo_char: bool) -> Result<char> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::io::AsRawFd;
+    use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+    use crossterm::terminal;
 
-        #[repr(C)]
-        #[derive(Clone, Copy)]
-        struct Termios {
-            c_iflag: u32,
-            c_oflag: u32,
-            c_cflag: u32,
-            c_lflag: u32,
-            c_cc: [u8; 32],
-            c_ispeed: u32,
-            c_ospeed: u32,
-        }
-
-        const ICANON: u32 = 0o000002;
-        const ECHO: u32 = 0o000010;
-        const VMIN: usize = 6;
-        const VTIME: usize = 5;
-        const TCSANOW: i32 = 0;
-
-        extern "C" {
-            fn tcgetattr(fd: i32, termios: *mut Termios) -> i32;
-            fn tcsetattr(fd: i32, action: i32, termios: *const Termios) -> i32;
-            fn read(fd: i32, buf: *mut u8, count: usize) -> isize;
-        }
-
-        let stdin_fd = std::io::stdin().as_raw_fd();
-        let mut old_termios = std::mem::MaybeUninit::<Termios>::uninit();
-
-        unsafe {
-            if tcgetattr(stdin_fd, old_termios.as_mut_ptr()) == 0 {
-                let old_termios = old_termios.assume_init();
-                let mut new_termios = old_termios;
-
-                // Disable canonical mode and echo
-                new_termios.c_lflag &= !(ICANON | ECHO);
-                new_termios.c_cc[VMIN] = 1;
-                new_termios.c_cc[VTIME] = 0;
-
-                if tcsetattr(stdin_fd, TCSANOW, &new_termios) == 0 {
-                    // Read a single byte
-                    let mut buf = [0u8; 1];
-                    let result = read(stdin_fd, buf.as_mut_ptr(), 1);
-
-                    // Restore terminal attributes
-                    tcsetattr(stdin_fd, TCSANOW, &old_termios);
-
-                    if result == 1 {
-                        let c = buf[0] as char;
-                        if echo_char {
-                            print!("{}", c);
-                            let _ = io::stdout().flush();
+    if terminal::enable_raw_mode().is_ok() {
+        let result = loop {
+            match event::read() {
+                Ok(Event::Key(KeyEvent {
+                    code, modifiers, ..
+                })) => {
+                    if modifiers.contains(KeyModifiers::CONTROL) {
+                        if let KeyCode::Char('c') = code {
+                            break Err(ClickError::Abort);
                         }
-                        return Ok(c);
+                    }
+                    match code {
+                        KeyCode::Char(c) => break Ok(c),
+                        KeyCode::Enter => break Ok('\n'),
+                        KeyCode::Backspace => break Ok('\x7f'),
+                        KeyCode::Tab => break Ok('\t'),
+                        KeyCode::Esc => break Ok('\x1b'),
+                        _ => continue,
                     }
                 }
+                Ok(_) => continue,
+                Err(e) => {
+                    break Err(ClickError::usage(format!("Failed to read key: {}", e)))
+                }
             }
-        }
-    }
-
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::Foundation::{BOOL, HANDLE, INVALID_HANDLE_VALUE};
-        use windows_sys::Win32::System::Console::{
-            GetConsoleMode, GetStdHandle, ReadConsoleInputW, SetConsoleMode, INPUT_RECORD,
-            ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, KEY_EVENT, STD_INPUT_HANDLE,
         };
+        let _ = terminal::disable_raw_mode();
 
-        let handle = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
-        if handle != 0 && handle != INVALID_HANDLE_VALUE {
-            let mut mode: u32 = 0;
-            unsafe {
-                if GetConsoleMode(handle, &mut mode) != 0 {
-                    let new_mode = mode & !(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT);
-                    if SetConsoleMode(handle, new_mode) != 0 {
-                        struct RestoreConsoleMode {
-                            handle: HANDLE,
-                            mode: u32,
-                        }
-
-                        impl Drop for RestoreConsoleMode {
-                            fn drop(&mut self) {
-                                unsafe {
-                                    let _ = SetConsoleMode(self.handle, self.mode);
-                                }
-                            }
-                        }
-
-                        let _restore = RestoreConsoleMode { handle, mode };
-
-                        loop {
-                            let mut rec = std::mem::MaybeUninit::<INPUT_RECORD>::uninit();
-                            let mut read: u32 = 0;
-                            let ok: BOOL =
-                                ReadConsoleInputW(handle, rec.as_mut_ptr(), 1, &mut read);
-                            if ok == 0 {
-                                break;
-                            }
-                            if read == 0 {
-                                continue;
-                            }
-
-                            let rec = rec.assume_init();
-                            if rec.EventType as u32 != KEY_EVENT {
-                                continue;
-                            }
-
-                            let key_event = rec.Event.KeyEvent;
-                            if key_event.bKeyDown == 0 {
-                                continue;
-                            }
-
-                            let u: u16 = key_event.uChar.UnicodeChar;
-                            if u == 0 {
-                                continue;
-                            }
-
-                            if let Some(c) = char::from_u32(u as u32) {
-                                if echo_char {
-                                    print!("{}", c);
-                                    let _ = io::stdout().flush();
-                                }
-                                return Ok(c);
-                            }
-                        }
-                    }
-                }
+        if let Ok(c) = &result {
+            if echo_char {
+                print!("{}", c);
+                let _ = io::stdout().flush();
             }
         }
+        return result;
     }
 
     // Fallback: read a line and return the first character
@@ -1197,105 +1023,50 @@ fn read_line(prompt: &str) -> Result<String> {
 }
 
 /// Read hidden input (for passwords).
+///
+/// Uses crossterm raw mode to read char-by-char without echo. Falls back to
+/// visible input when not connected to a TTY (e.g., piped stdin in tests).
 fn read_hidden_input(prompt: &str) -> Result<String> {
+    use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+    use crossterm::terminal;
+
     if !prompt.is_empty() {
         print!("{}", prompt);
         let _ = io::stdout().flush();
     }
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::io::AsRawFd;
-
-        #[repr(C)]
-        #[derive(Clone, Copy)]
-        struct Termios {
-            c_iflag: u32,
-            c_oflag: u32,
-            c_cflag: u32,
-            c_lflag: u32,
-            c_cc: [u8; 32],
-            c_ispeed: u32,
-            c_ospeed: u32,
-        }
-
-        const ECHO: u32 = 0o000010;
-        const TCSANOW: i32 = 0;
-
-        extern "C" {
-            fn tcgetattr(fd: i32, termios: *mut Termios) -> i32;
-            fn tcsetattr(fd: i32, action: i32, termios: *const Termios) -> i32;
-        }
-
-        let stdin_fd = std::io::stdin().as_raw_fd();
-        let mut old_termios = std::mem::MaybeUninit::<Termios>::uninit();
-
-        unsafe {
-            if tcgetattr(stdin_fd, old_termios.as_mut_ptr()) == 0 {
-                let old_termios = old_termios.assume_init();
-                let mut new_termios = old_termios;
-
-                // Disable echo
-                new_termios.c_lflag &= !ECHO;
-
-                if tcsetattr(stdin_fd, TCSANOW, &new_termios) == 0 {
-                    // Read the line
-                    let result = read_line("");
-
-                    // Restore terminal
-                    tcsetattr(stdin_fd, TCSANOW, &old_termios);
-
-                    // Print newline since echo was disabled
-                    println!();
-
-                    return result;
-                }
-            }
-        }
-    }
-
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
-        use windows_sys::Win32::System::Console::{
-            GetConsoleMode, GetStdHandle, SetConsoleMode, ENABLE_ECHO_INPUT, STD_INPUT_HANDLE,
-        };
-
-        let handle = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
-        if handle != 0 && handle != INVALID_HANDLE_VALUE {
-            let mut mode: u32 = 0;
-            unsafe {
-                if GetConsoleMode(handle, &mut mode) != 0 {
-                    let new_mode = mode & !ENABLE_ECHO_INPUT;
-                    if SetConsoleMode(handle, new_mode) != 0 {
-                        struct RestoreConsoleMode {
-                            handle: HANDLE,
-                            mode: u32,
+    // Try crossterm raw mode for hidden char-by-char reading (cross-platform, no unsafe).
+    if terminal::enable_raw_mode().is_ok() {
+        let mut input = String::new();
+        let result = loop {
+            match event::read() {
+                Ok(Event::Key(KeyEvent {
+                    code, modifiers, ..
+                })) => {
+                    if modifiers.contains(KeyModifiers::CONTROL) {
+                        if let KeyCode::Char('c') = code {
+                            break Err(ClickError::Abort);
                         }
-
-                        impl Drop for RestoreConsoleMode {
-                            fn drop(&mut self) {
-                                unsafe {
-                                    let _ = SetConsoleMode(self.handle, self.mode);
-                                }
-                            }
+                    }
+                    match code {
+                        KeyCode::Enter => break Ok(input.clone()),
+                        KeyCode::Char(c) => input.push(c),
+                        KeyCode::Backspace => {
+                            input.pop();
                         }
-
-                        let _restore = RestoreConsoleMode { handle, mode };
-
-                        let result = read_line("");
-
-                        // Print newline since echo was disabled
-                        println!();
-
-                        return result;
+                        _ => {}
                     }
                 }
+                Ok(_) => continue,
+                Err(_) => break Ok(input.clone()),
             }
-        }
+        };
+        let _ = terminal::disable_raw_mode();
+        println!();
+        return result;
     }
 
-    // Fallback: warn user and read normally
+    // Fallback: warn user and read normally (non-TTY, e.g., piped stdin)
     echo("(Warning: Input will be visible)", true, true, None);
     read_line("")
 }
@@ -1308,7 +1079,7 @@ fn read_hidden_input(prompt: &str) -> Result<String> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use click::termui::ProgressBar;
 ///
 /// let mut bar = ProgressBar::new(100, Some("Processing"), true, true, true, 40);
@@ -1401,7 +1172,8 @@ impl ProgressBar {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// use click::termui::ProgressBar;
     /// let bar = ProgressBar::new(100, None, true, true, false, 30)
     ///     .fill_char('█');
     /// ```
@@ -1416,7 +1188,8 @@ impl ProgressBar {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// use click::termui::ProgressBar;
     /// let bar = ProgressBar::new(100, None, true, true, false, 30)
     ///     .empty_char('░');
     /// ```
@@ -1574,9 +1347,10 @@ impl Drop for ProgressBar {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use click::termui::progressbar;
 ///
+/// let items = vec![1, 2, 3, 4, 5];
 /// for item in progressbar(items.iter(), Some(items.len()), Some("Processing")) {
 ///     // Process item
 /// }

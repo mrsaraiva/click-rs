@@ -10,7 +10,7 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```no_run
 //! use click::completion::{get_completion_class, shell_complete};
 //! use click::command::Command;
 //!
@@ -403,7 +403,7 @@ pub fn list_shells() -> Vec<&'static str> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use click::completion::shell_complete;
 /// use click::command::Command;
 /// use std::env;
@@ -648,13 +648,11 @@ fn get_option_completions(
 ///
 /// # Example
 ///
-/// ```rust,ignore
-/// use click::command::Command;
-/// use click::completion::completion_option;
+/// ```
+/// use click::completion::make_completion_option;
 ///
-/// let cmd = Command::new("myapp")
-///     .option(completion_option("_MYAPP_COMPLETE"))
-///     .build();
+/// let opt = make_completion_option("_MYAPP_COMPLETE");
+/// assert!(!opt.is_completion_requested());
 /// ```
 pub fn make_completion_option(complete_var: &str) -> CompletionOption {
     CompletionOption {
