@@ -1,3 +1,7 @@
 /target
 **/target/
+.idea/
+.DS_Store
+._*
+docs/devel/
 .venv/
