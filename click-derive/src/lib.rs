@@ -40,7 +40,7 @@ mod function;
 mod group;
 
 use command::expand_command;
-use function::expand_command_fn;
+use function::{expand_command_fn, expand_group_fn};
 use group::expand_group;
 
 /// Derive macro for creating CLI commands from structs.
@@ -194,6 +194,32 @@ pub fn command(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = proc_macro2::TokenStream::from(args);
     let input = parse_macro_input!(input as ItemFn);
     expand_command_fn(args, input)
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}
+
+/// Attribute macro for function-first group definitions.
+///
+/// Supports all `#[group(...)]` options accepted by the derive macro, plus:
+/// - `commands = [a, b, c]` where each entry resolves to `<name>_command()` (or can be explicit calls)
+/// - `groups = [nested]` where each entry resolves to `<name>_group()` (or can be explicit calls)
+///
+/// # Example
+///
+/// ```ignore
+/// #[click::group(name = "cli", commands = [hello], groups = [admin])]
+/// fn cli(#[option(short, long)] verbose: bool) -> click::Result<()> {
+///     if verbose { println!("verbose mode"); }
+///     Ok(())
+/// }
+///
+/// let grp = cli_group();
+/// ```
+#[proc_macro_attribute]
+pub fn group(args: TokenStream, input: TokenStream) -> TokenStream {
+    let args = proc_macro2::TokenStream::from(args);
+    let input = parse_macro_input!(input as ItemFn);
+    expand_group_fn(args, input)
         .unwrap_or_else(|e| e.to_compile_error())
         .into()
 }

@@ -1,5 +1,6 @@
 //! Integration tests for the derive macros.
 
+use click::CommandLike;
 use click_derive::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -40,9 +41,18 @@ fn test_command_help() {
 
     // Help should contain relevant information
     assert!(help.contains("greet"), "Help should contain command name");
-    assert!(help.contains("NAME") || help.contains("name"), "Help should contain argument");
-    assert!(help.contains("--count") || help.contains("-c"), "Help should contain count option");
-    assert!(help.contains("--verbose") || help.contains("-v"), "Help should contain verbose option");
+    assert!(
+        help.contains("NAME") || help.contains("name"),
+        "Help should contain argument"
+    );
+    assert!(
+        help.contains("--count") || help.contains("-c"),
+        "Help should contain count option"
+    );
+    assert!(
+        help.contains("--verbose") || help.contains("-v"),
+        "Help should contain verbose option"
+    );
 }
 
 #[test]
@@ -54,10 +64,16 @@ fn test_command_with_callback() {
 
     let cmd = Greet::command_with_run(move |greet, _ctx| {
         for _ in 0..greet.count {
-            output_clone.lock().unwrap().push(format!("Hello, {}!", greet.name));
+            output_clone
+                .lock()
+                .unwrap()
+                .push(format!("Hello, {}!", greet.name));
         }
         if greet.verbose {
-            output_clone.lock().unwrap().push("(verbose mode)".to_string());
+            output_clone
+                .lock()
+                .unwrap()
+                .push("(verbose mode)".to_string());
         }
         Ok(())
     });
@@ -74,12 +90,20 @@ fn test_command_with_callback() {
     let output_clone = output.clone();
     let cmd = Greet::command_with_run(move |greet, _ctx| {
         for _ in 0..greet.count {
-            output_clone.lock().unwrap().push(format!("Hello, {}!", greet.name));
+            output_clone
+                .lock()
+                .unwrap()
+                .push(format!("Hello, {}!", greet.name));
         }
         Ok(())
     });
 
-    cmd.main(vec!["--count".to_string(), "3".to_string(), "Alice".to_string()]).unwrap();
+    cmd.main(vec![
+        "--count".to_string(),
+        "3".to_string(),
+        "Alice".to_string(),
+    ])
+    .unwrap();
     let lines = output.lock().unwrap();
     assert_eq!(lines.len(), 3);
     for line in lines.iter() {
@@ -91,7 +115,11 @@ fn test_command_with_callback() {
 fn test_command_from_context() {
     let cmd = Greet::command();
     let ctx = cmd
-        .make_context("greet", vec!["--count".to_string(), "2".to_string(), "Bob".to_string()], None)
+        .make_context(
+            "greet",
+            vec!["--count".to_string(), "2".to_string(), "Bob".to_string()],
+            None,
+        )
         .unwrap();
 
     let greet = Greet::from_context(&ctx).unwrap();
@@ -124,7 +152,9 @@ fn test_optional_argument() {
     assert!(args.output.is_none());
 
     // With argument
-    let ctx = cmd.make_context("optional", vec!["test.txt".to_string()], None).unwrap();
+    let ctx = cmd
+        .make_context("optional", vec!["test.txt".to_string()], None)
+        .unwrap();
     let args = OptionalArgs::from_context(&ctx).unwrap();
     assert_eq!(args.filename, Some("test.txt".to_string()));
 }
@@ -150,8 +180,10 @@ fn test_multiple_values() {
         .make_context(
             "multi",
             vec![
-                "-t".to_string(), "tag1".to_string(),
-                "-t".to_string(), "tag2".to_string(),
+                "-t".to_string(),
+                "tag1".to_string(),
+                "-t".to_string(),
+                "tag2".to_string(),
                 "file1.txt".to_string(),
                 "file2.txt".to_string(),
             ],
@@ -184,7 +216,11 @@ fn test_count_option() {
 
     // Multiple -v flags
     let ctx = cmd
-        .make_context("verbose", vec!["-v".to_string(), "-v".to_string(), "-v".to_string()], None)
+        .make_context(
+            "verbose",
+            vec!["-v".to_string(), "-v".to_string(), "-v".to_string()],
+            None,
+        )
         .unwrap();
     let args = VerboseCmd::from_context(&ctx).unwrap();
     assert_eq!(args.verbose, 3);
@@ -209,7 +245,10 @@ fn test_doc_comment_help() {
     let ctx = click::ContextBuilder::new().info_name("documented").build();
     let help = cmd.get_help(&ctx);
 
-    assert!(help.contains("documented"), "Help should contain command name");
+    assert!(
+        help.contains("documented"),
+        "Help should contain command name"
+    );
 }
 
 /// Test command with hidden option
@@ -233,8 +272,14 @@ fn test_hidden_option() {
     let ctx = click::ContextBuilder::new().info_name("hidden").build();
     let help = cmd.get_help(&ctx);
 
-    assert!(help.contains("--visible"), "Help should contain visible option");
-    assert!(!help.contains("--secret"), "Help should not contain hidden option");
+    assert!(
+        help.contains("--visible"),
+        "Help should contain visible option"
+    );
+    assert!(
+        !help.contains("--secret"),
+        "Help should not contain hidden option"
+    );
 }
 
 static AUTO_RUN_CALLED: AtomicBool = AtomicBool::new(false);
@@ -279,7 +324,51 @@ fn test_function_command_attribute_macro() {
     let cmd = fn_greet_command();
     assert_eq!(cmd.name.as_deref(), Some("fn-greet"));
     assert!(cmd.main(vec![]).is_err());
-    assert!(cmd.main(vec!["--count".to_string(), "2".to_string(), "Bob".to_string()]).is_ok());
+    assert!(cmd
+        .main(vec![
+            "--count".to_string(),
+            "2".to_string(),
+            "Bob".to_string()
+        ])
+        .is_ok());
+}
+
+#[click::command(name = "leaf-one")]
+fn leaf_one() -> click::Result<()> {
+    Ok(())
+}
+
+#[click::command(name = "leaf-two")]
+fn leaf_two() -> click::Result<()> {
+    Ok(())
+}
+
+#[click::command(name = "nested-leaf")]
+fn nested_leaf() -> click::Result<()> {
+    Ok(())
+}
+
+#[click::group(name = "nested", commands = [nested_leaf])]
+fn nested() -> click::Result<()> {
+    Ok(())
+}
+
+#[click::group(name = "root", commands = [leaf_one, leaf_two], groups = [nested])]
+fn root(#[option(short, long)] verbose: bool) -> click::Result<()> {
+    let _ = verbose;
+    Ok(())
+}
+
+#[test]
+fn test_function_group_attribute_macro_with_attachments() {
+    let group = root_group();
+    assert_eq!(group.command.name.as_deref(), Some("root"));
+    let names = group.list_commands();
+    assert_eq!(names, vec!["leaf-one", "leaf-two", "nested"]);
+    assert!(CommandLike::main(&group, vec!["leaf-one".to_string()]).is_ok());
+    assert!(group
+        .main(vec!["nested".to_string(), "nested-leaf".to_string()])
+        .is_ok());
 }
 
 // Note: Environment variable support in options is defined at the struct level
@@ -322,12 +411,8 @@ fn test_derive_shell_complete_attributes() {
     let arg_completions = click::completion::get_completions(&cmd, "complete-me", &[], "a");
     assert!(arg_completions.iter().any(|c| c.value == "alice"));
 
-    let opt_value_completions = click::completion::get_completions(
-        &cmd,
-        "complete-me",
-        &["--env".to_string()],
-        "HO",
-    );
+    let opt_value_completions =
+        click::completion::get_completions(&cmd, "complete-me", &["--env".to_string()], "HO");
     assert!(opt_value_completions.iter().any(|c| c.value == "HOME"));
     assert!(opt_value_completions.iter().any(|c| c.value == "HOSTNAME"));
 }

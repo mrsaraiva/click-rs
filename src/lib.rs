@@ -88,8 +88,10 @@ pub use argument::{AnyTypeConverter, Argument, ArgumentBuilder, ShellCompleteCal
 pub use command::{Command, CommandBuilder, CommandCallback};
 pub use context::{get_current_context, pop_context, push_context, Context, ContextBuilder};
 pub use decorators::{make_pass_decorator, PassDecorator};
-pub use group::{CommandCollection, CommandCollectionBuilder, CommandLike, Group, GroupBuilder, ResultCallback};
 pub use error::{ClickError, ErrorContext, ParamType, Result};
+pub use group::{
+    CommandCollection, CommandCollectionBuilder, CommandLike, Group, GroupBuilder, ResultCallback,
+};
 pub use option::{parse_option_name, split_option_names, ClickOption, OptionBuilder};
 pub use parameter::{DeprecationInfo, Nargs, Parameter, ParameterConfig};
 pub use parser::{split_opt, OptionAction, OptionParser, ParseResult, ParsedValue};
@@ -133,7 +135,7 @@ pub use formatting::{
 
 // Re-export derive macros when "derive" feature is enabled
 #[cfg(feature = "derive")]
-pub use click_derive::{command, Command, Group};
+pub use click_derive::{command, group, Command, Group};
 
 // Re-export type converter trait and common types
 pub use types::{
@@ -175,9 +177,7 @@ pub use termui::{
 };
 
 // Re-export shell completion
-pub use completion::{
-    shell_complete, BashComplete, FishComplete, ShellComplete, ZshComplete,
-};
+pub use completion::{shell_complete, BashComplete, FishComplete, ShellComplete, ZshComplete};
 
 // Re-export testing utilities
 pub use testing::{CliRunner, InvokeResult, IsolatedFilesystem};

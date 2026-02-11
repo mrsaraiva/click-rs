@@ -3,7 +3,7 @@
 use std::env;
 use std::fs;
 
-use click::{run_with_completion, ClickError, Group, Result};
+use click::{run_with_completion, ClickError, Result};
 
 #[click::command(name = "ls", help = "List directory contents")]
 fn ls(
@@ -25,7 +25,10 @@ fn ls(
             println!("{}", names.join("\n"));
             Ok(())
         }
-        Err(e) => Err(ClickError::usage(format!("Cannot read directory '{}': {}", dir, e))),
+        Err(e) => Err(ClickError::usage(format!(
+            "Cannot read directory '{}': {}",
+            dir, e
+        ))),
     }
 }
 
@@ -63,21 +66,26 @@ fn select_user(
     Ok(())
 }
 
-fn build_cli() -> Group {
-    let nested = Group::new("group")
-        .help("A group that holds a subcommand")
-        .command(select_user_command())
-        .build();
+#[click::group(
+    name = "group",
+    help = "A group that holds a subcommand",
+    commands = [select_user]
+)]
+fn group() -> Result<()> {
+    Ok(())
+}
 
-    Group::new("completion")
-        .help("Shell completion demo CLI")
-        .command(ls_command())
-        .command(show_env_command())
-        .command(nested)
-        .build()
+#[click::group(
+    name = "completion",
+    help = "Shell completion demo CLI",
+    commands = [ls, show_env],
+    groups = [group]
+)]
+fn completion() -> Result<()> {
+    Ok(())
 }
 
 fn main() {
-    let cli = build_cli();
+    let cli = completion_group();
     run_with_completion(&cli, "completion", "_COMPLETION_COMPLETE");
 }
