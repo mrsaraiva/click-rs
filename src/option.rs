@@ -16,7 +16,10 @@ use crate::context::Context;
 use crate::error::ClickError;
 use crate::parameter::{Nargs, Parameter, ParameterCallback, ParameterConfig};
 use crate::argument::AnyTypeConverter;
-use crate::types::{StringType, TypeConverter, STRING};
+use crate::types::{CompletionItem, StringType, TypeConverter, STRING};
+
+/// Custom shell completion callback type for option values.
+pub type ShellCompleteCallback = Arc<dyn Fn(&Context, &str) -> Vec<CompletionItem> + Send + Sync>;
 
 // =============================================================================
 // Option Name Parsing
@@ -180,6 +183,9 @@ pub struct ClickOption {
     type_metavar: Option<String>,
     /// Type converter (type-erased).
     type_converter: Arc<dyn AnyTypeConverter>,
+
+    /// Custom shell completion callback for option values.
+    shell_complete_callback: Option<ShellCompleteCallback>,
 }
 
 impl fmt::Debug for ClickOption {
@@ -200,6 +206,7 @@ impl fmt::Debug for ClickOption {
             .field("show_envvar", &self.show_envvar)
             .field("default", &self.default)
             .field("type_name", &self.type_name)
+            .field("has_shell_complete", &self.shell_complete_callback.is_some())
             .field("has_type_converter", &true)
             .finish()
     }
@@ -254,6 +261,23 @@ impl ClickOption {
     /// Returns the converted value as a boxed Any type.
     pub fn convert_multi(&self, values: &[String]) -> Result<Box<dyn Any + Send + Sync>, String> {
         self.type_converter.convert_multi(values)
+    }
+
+    /// Get shell completions for this option value.
+    ///
+    /// If a custom shell completion callback is set, it takes precedence over
+    /// type-driven completions.
+    pub fn get_completions(&self, ctx: &Context, incomplete: &str) -> Vec<CompletionItem> {
+        if let Some(ref callback) = self.shell_complete_callback {
+            callback(ctx, incomplete)
+        } else {
+            self.type_converter.shell_complete(incomplete)
+        }
+    }
+
+    /// Check if this option has a custom shell completion callback.
+    pub fn has_shell_complete_callback(&self) -> bool {
+        self.shell_complete_callback.is_some()
     }
 }
 
@@ -417,6 +441,7 @@ pub struct OptionBuilder {
     type_name: String,
     type_metavar: Option<String>,
     type_converter: Option<Arc<dyn AnyTypeConverter>>,
+    shell_complete_callback: Option<ShellCompleteCallback>,
     nargs: Nargs,
     callback: Option<ParameterCallback>,
 }
@@ -456,9 +481,18 @@ impl OptionBuilder {
             type_name: TypeConverter::name(&STRING).to_string(),
             type_metavar: TypeConverter::get_metavar(&STRING),
             type_converter: None,
+            shell_complete_callback: None,
             nargs: Nargs::Count(1),
             callback: None,
         }
+    }
+
+    /// Override the destination parameter name used in context storage.
+    ///
+    /// This allows multiple flags/options to write to the same logical value.
+    pub fn dest(mut self, name: &str) -> Self {
+        self.name = name.to_string();
+        self
     }
 
     /// Set the help text for this option.
@@ -555,6 +589,15 @@ impl OptionBuilder {
             + 'static,
     {
         self.callback = Some(Arc::new(callback));
+        self
+    }
+
+    /// Set a custom shell completion callback for option values.
+    pub fn shell_complete<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(&Context, &str) -> Vec<CompletionItem> + Send + Sync + 'static,
+    {
+        self.shell_complete_callback = Some(Arc::new(callback));
         self
     }
 
@@ -657,6 +700,7 @@ impl OptionBuilder {
             type_name: self.type_name,
             type_metavar: self.type_metavar,
             type_converter,
+            shell_complete_callback: self.shell_complete_callback,
         }
     }
 }
@@ -745,6 +789,14 @@ mod tests {
         assert_eq!(opt.help(), Some("The name to greet"));
         assert!(!opt.is_flag);
         assert!(!opt.required());
+    }
+
+    #[test]
+    fn test_option_builder_dest_override() {
+        let opt = ClickOption::new(&["--moored"]).dest("ty").flag("moored").build();
+        assert_eq!(opt.name(), "ty");
+        assert_eq!(opt.long, vec!["--moored"]);
+        assert_eq!(opt.flag_value, Some("moored".to_string()));
     }
 
     #[test]

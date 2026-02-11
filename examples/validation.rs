@@ -1,13 +1,8 @@
-//! Validation example - demonstrates parameter validation techniques.
-//!
-//! This example shows validation through:
-//! - Callbacks (validate_count)
-//! - Custom types (URL type)
-//! - Manual validation in the callback
+//! Validation example - demonstrates declarative parameter validation.
 //!
 //! Equivalent to Python Click's examples/validation/validation.py
 
-use click::{echo, ClickError, ClickOption, Command, Context, Result, TypeConverter};
+use click::{echo, run, Result, TypeConverter};
 
 /// A URL parameter type that validates HTTP/HTTPS URLs.
 #[derive(Debug, Clone)]
@@ -23,19 +18,15 @@ struct ParsedUrl {
 
 impl ParsedUrl {
     fn parse(url: &str) -> Option<Self> {
-        // Simple URL parsing - split on ://
         let mut parts = url.splitn(2, "://");
         let scheme = parts.next()?.to_lowercase();
         let rest = parts.next()?;
-
-        // Split path from netloc
         let (netloc, path) = if let Some(slash_pos) = rest.find('/') {
             (&rest[..slash_pos], &rest[slash_pos..])
         } else {
             (rest, "")
         };
-
-        Some(ParsedUrl {
+        Some(Self {
             scheme,
             netloc: netloc.to_string(),
             path: path.to_string(),
@@ -62,14 +53,12 @@ impl TypeConverter for UrlType {
 
     fn convert(&self, value: &str) -> std::result::Result<Self::Value, String> {
         let parsed = ParsedUrl::parse(value).ok_or_else(|| format!("invalid URL: {}", value))?;
-
         if parsed.scheme != "http" && parsed.scheme != "https" {
             return Err(format!(
                 "invalid URL scheme ({}). Only HTTP URLs are allowed",
                 parsed.scheme
             ));
         }
-
         Ok(parsed)
     }
 
@@ -78,94 +67,38 @@ impl TypeConverter for UrlType {
     }
 }
 
-/// Validate that count is a positive, even integer.
-fn validate_count(value: &str) -> std::result::Result<i32, String> {
+fn validate_count(value: &String) -> std::result::Result<(), String> {
     let count: i32 = value
         .parse()
         .map_err(|_| format!("'{}' is not a valid integer", value))?;
-
     if count < 0 || count % 2 != 0 {
         return Err("Should be a positive, even integer.".to_string());
     }
-
-    Ok(count)
+    Ok(())
 }
 
-/// Build the validation command.
-fn build_command() -> Command {
-    Command::new("validation")
-        .help(
-            "Validation.\n\n\
-            This example validates parameters in different ways. It does it \
-            through callbacks, through a custom type as well as by validating \
-            manually in the function.",
-        )
-        .option(
-            ClickOption::new(&["--count"])
-                .default("2")
-                .help("A positive even number.")
-                .build(),
-        )
-        .option(
-            ClickOption::new(&["--foo"])
-                .help("A mysterious parameter.")
-                .build(),
-        )
-        .option(
-            ClickOption::new(&["--url"])
-                .help("A URL")
-                .build(),
-        )
-        .option(
-            ClickOption::new(&["--version", "-V"])
-                .flag("true")
-                .eager()
-                .help("Show the version and exit.")
-                .metavar("__click_version__:validation, version 1.0")
-                .build(),
-        )
-        .callback(cli_callback)
-        .build()
-}
-
-/// The callback that performs validation and prints results.
-fn cli_callback(ctx: &Context) -> Result<()> {
-    // Get and validate count
-    let count_str = ctx
-        .get_param::<String>("count")
-        .cloned()
-        .unwrap_or_else(|| "2".to_string());
-
-    let count = validate_count(&count_str)
-        .map_err(|e| ClickError::bad_parameter_named(e, "count"))?;
-
-    // Get and validate foo
-    let foo = ctx.get_param::<String>("foo").cloned();
-
-    if let Some(ref foo_val) = foo {
-        if foo_val != "wat" {
-            return Err(ClickError::bad_parameter_named(
-                "If a value is provided it needs to be the value \"wat\".",
-                "foo",
-            ));
-        }
+fn validate_foo(value: &String) -> std::result::Result<(), String> {
+    if value == "wat" {
+        Ok(())
+    } else {
+        Err("If a value is provided it needs to be the value \"wat\".".to_string())
     }
+}
 
-    // Get and validate URL
-    let url_str = ctx.get_param::<String>("url").cloned();
-    let url = match url_str {
-        Some(ref s) => {
-            let url_type = UrlType;
-            Some(
-                url_type
-                    .convert(s)
-                    .map_err(|e| ClickError::bad_parameter_named(e, "url"))?,
-            )
-        }
-        None => None,
-    };
-
-    // Print results
+#[click::command(name = "validation")]
+fn validation(
+    #[option(
+        long,
+        default = "2".to_string(),
+        help = "A positive even number.",
+        validate = validate_count
+    )]
+    count: String,
+    #[option(long, help = "A mysterious parameter.", validate = validate_foo)]
+    foo: Option<String>,
+    #[option(long, help = "A URL", type = UrlType)]
+    url: Option<ParsedUrl>,
+) -> Result<()> {
     echo(&format!("count: {}", count), true, false, None);
     echo(
         &format!("foo: {}", foo.as_deref().unwrap_or("None")),
@@ -176,23 +109,16 @@ fn cli_callback(ctx: &Context) -> Result<()> {
     echo(
         &format!(
             "url: {}",
-            url.map(|u| format!("{}", u))
+            url.map(|parsed| parsed.to_string())
                 .unwrap_or_else(|| "None".to_string())
         ),
         true,
         false,
         None,
     );
-
     Ok(())
 }
 
 fn main() {
-    let cmd = build_command();
-    let args: Vec<String> = std::env::args().skip(1).collect();
-
-    if let Err(e) = cmd.main(args) {
-        eprintln!("{}", e.format_full());
-        std::process::exit(e.exit_code());
-    }
+    run(&validation_command());
 }

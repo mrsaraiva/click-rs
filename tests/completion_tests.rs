@@ -7,7 +7,7 @@ use click::completion::{
 };
 use click::group::Group;
 use click::option::ClickOption;
-use click::CompletionItem;
+use click::{Choice, CompletionItem};
 
 // =============================================================================
 // Shell Detection and Registry Tests
@@ -257,6 +257,84 @@ fn test_get_completions_short_options() {
     let completions = get_completions(&cmd, "test", &[], "-");
 
     assert!(completions.iter().any(|c| c.value == "-n"));
+}
+
+#[test]
+fn test_get_completions_option_value_custom_callback() {
+    let cmd = Command::new("test")
+        .option(
+            ClickOption::new(&["--user"])
+                .shell_complete(|_ctx, incomplete| {
+                    ["alice", "bob", "charlie"]
+                        .into_iter()
+                        .filter(|name| name.starts_with(incomplete))
+                        .map(CompletionItem::new)
+                        .collect()
+                })
+                .build(),
+        )
+        .build();
+
+    let completions = get_completions(&cmd, "test", &["--user".to_string()], "a");
+    assert_eq!(completions.len(), 1);
+    assert_eq!(completions[0].value, "alice");
+}
+
+#[test]
+fn test_get_completions_option_value_inline_assignment() {
+    let cmd = Command::new("test")
+        .option(
+            ClickOption::new(&["--user"])
+                .shell_complete(|_ctx, incomplete| {
+                    ["alice", "bob"]
+                        .into_iter()
+                        .filter(|name| name.starts_with(incomplete))
+                        .map(CompletionItem::new)
+                        .collect()
+                })
+                .build(),
+        )
+        .build();
+
+    let completions = get_completions(&cmd, "test", &[], "--user=a");
+    assert_eq!(completions.len(), 1);
+    assert_eq!(completions[0].value, "--user=alice");
+}
+
+#[test]
+fn test_get_completions_option_value_from_type() {
+    let cmd = Command::new("test")
+        .option(
+            ClickOption::new(&["--mode"])
+                .type_any(Choice::new(vec!["fast", "full", "safe"]))
+                .build(),
+        )
+        .build();
+
+    let completions = get_completions(&cmd, "test", &["--mode".to_string()], "f");
+    assert!(completions.iter().any(|c| c.value == "fast"));
+    assert!(completions.iter().any(|c| c.value == "full"));
+    assert!(!completions.iter().any(|c| c.value == "safe"));
+}
+
+#[test]
+fn test_complete_items_helper() {
+    let complete = click::complete::items(&["alpha", "beta", "gamma"]);
+    let ctx = click::ContextBuilder::new().build();
+    let out = complete(&ctx, "a");
+    assert!(out.iter().any(|item| item.value == "alpha"));
+    assert!(out.iter().any(|item| item.value == "beta"));
+}
+
+#[test]
+fn test_complete_items_with_help_helper() {
+    let complete =
+        click::complete::items_with_help(&[("bob", "butcher"), ("alice", "baker")]);
+    let ctx = click::ContextBuilder::new().build();
+    let out = complete(&ctx, "bak");
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].value, "alice");
+    assert_eq!(out[0].help.as_deref(), Some("baker"));
 }
 
 #[test]

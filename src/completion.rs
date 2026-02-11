@@ -525,11 +525,16 @@ pub fn get_completions(
     // Complete options
     if incomplete.starts_with('-') || completions.is_empty() {
         if let Some(command) = cmd.as_any().downcast_ref::<Command>() {
-            completions.extend(get_option_completions(command, &ctx, incomplete));
+            completions.extend(get_option_completions(command, &ctx, args, incomplete));
         } else if let Some(group) = cmd.as_any().downcast_ref::<Group>() {
-            completions.extend(get_option_completions(&group.command, &ctx, incomplete));
+            completions.extend(get_option_completions(&group.command, &ctx, args, incomplete));
         } else if let Some(collection) = cmd.as_any().downcast_ref::<CommandCollection>() {
-            completions.extend(get_option_completions(&collection.base.command, &ctx, incomplete));
+            completions.extend(get_option_completions(
+                &collection.base.command,
+                &ctx,
+                args,
+                incomplete,
+            ));
         }
     }
 
@@ -584,8 +589,46 @@ fn get_argument_completions(
 fn get_option_completions(
     cmd: &Command,
     ctx: &crate::context::Context,
+    args: &[String],
     incomplete: &str,
 ) -> Vec<CompletionItem> {
+    // Completing an inline option value: --name=value
+    if let Some((opt_name, value_prefix)) = incomplete.split_once('=') {
+        if opt_name.starts_with("--") {
+            if let Some(opt) = cmd
+                .options
+                .iter()
+                .find(|o| o.long.iter().any(|long| long == opt_name) && option_accepts_value(o))
+            {
+                return opt
+                    .get_completions(ctx, value_prefix)
+                    .into_iter()
+                    .map(|item| {
+                        let mut with_prefix = CompletionItem::new(format!(
+                            "{}={}",
+                            opt_name, item.value
+                        ));
+                        if let Some(help) = item.help {
+                            with_prefix = with_prefix.with_help(help);
+                        }
+                        with_prefix
+                    })
+                    .collect();
+            }
+        }
+    }
+
+    // Completing an option value provided as the next token: --name <TAB>
+    if let Some(last_arg) = args.last() {
+        if let Some(opt) = cmd.options.iter().find(|o| {
+            option_accepts_value(o)
+                && (o.long.iter().any(|long| long == last_arg)
+                    || o.short.iter().any(|short| short == last_arg))
+        }) {
+            return opt.get_completions(ctx, incomplete);
+        }
+    }
+
     let mut completions = Vec::new();
 
     for opt in &cmd.options {
@@ -639,6 +682,10 @@ fn get_option_completions(
     }
 
     completions
+}
+
+fn option_accepts_value(opt: &crate::option::ClickOption) -> bool {
+    !opt.is_flag && !opt.count
 }
 
 /// Add the shell completion option to a command.

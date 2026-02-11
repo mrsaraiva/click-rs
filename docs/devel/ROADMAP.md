@@ -6,13 +6,123 @@ A comprehensive task list for porting Python Click to Rust. Reference: `/home/ms
 
 ## Current Status
 
-**Last Updated:** 2026-02-03
+**Last Updated:** 2026-02-11
 
 **Project State:** Phases 1–6 complete (Milestone M4 achieved). Parity suites for phases 1–6 pass via `tests/parity/run_parity.sh`.
 
 **Next Milestone:** M5: Cross-platform `CliRunner` output capture (must-capture on Linux/macOS/Windows) + behavior gap hardening.
 
 **Notes:** Some roadmap items are implemented with slightly different Rust APIs than the Python references. See individual phase tables for remaining gaps.
+
+## API Ergonomics Plan (Pre-Rewrite)
+
+This section tracks API-level reductions to close the Rust/Python example LoC gap **before** bulk rewriting examples.
+
+### Baseline (2026-02-11)
+
+| Metric | Value |
+|--------|-------|
+| Rust examples total LoC | 2526 |
+| Python examples total LoC | 1095 |
+| Current ratio | 2.31x |
+
+Largest gaps:
+
+| Example | Rust | Python | Ratio |
+|---------|------|--------|-------|
+| validation | 198 | 48 | 4.12x |
+| naval | 292 | 72 | 4.06x |
+| colors | 146 | 39 | 3.74x |
+| inout | 103 | 30 | 3.43x |
+| aliases | 431 | 143 | 3.01x |
+
+### E1: Function-First Group/Attachment API
+
+**Goal:** Remove explicit `Group::new(...).command(...)` trees where Python uses decorators.
+
+**Deliverables:**
+- Add `#[click::group(...)]` function attribute macro (parallel to `#[click::command(...)]`).
+- Add parent-attachment attributes for function-first commands/groups (e.g., `#[click::command(parent = "...")]`).
+- Generate deterministic registration order to match source order.
+
+**Acceptance criteria:**
+- `naval`, `termui`, and `colors` can be expressed without manual command tree builders.
+- No manual `Command::new`/`Group::new` required for simple hierarchy wiring.
+- Integration tests cover nested groups and help output ordering.
+
+### E2: Param Adapters on Function Signatures
+
+**Goal:** Collapse builder-level type plumbing into parameter attributes.
+
+**Deliverables:**
+- `#[argument(type = ...)]` and `#[option(type = ...)]` on function params with adapter shortcuts:
+  - file read/write
+  - path constraints
+  - typed float/int conversion
+  - variadic args (`nargs = -1`)
+- Keep existing derive-style attributes compatible.
+
+**Acceptance criteria:**
+- `inout` can model `click.File("rb"/"wb")` without manual `FileType` conversion code.
+- `naval` numeric arguments parse directly from function parameter types.
+- `validation` custom type wiring is declarative on param attributes.
+
+### E3: Declarative Param Validators
+
+**Goal:** Remove manual `ctx.get_param(...)` + ad-hoc validation blocks for common paths.
+
+**Deliverables:**
+- Validator hook on function params (e.g., `#[option(validate = validate_count)]`).
+- Error mapping to `BadParameter` with correct param hint/name.
+- Support validator signatures with context when needed.
+
+**Acceptance criteria:**
+- `validation` `count` and `foo` checks can be attached declaratively to params.
+- Callback receives typed values when type conversion is configured.
+- Errors match existing message shape and exit behavior.
+
+### E4: Flag-Value Groups (Multi-Flag → Single Param)
+
+**Goal:** Match Click’s `flag_value` pattern used in examples like `naval mine set`.
+
+**Deliverables:**
+- Option metadata to bind multiple flags to one destination field.
+- Default and precedence rules compatible with Click semantics.
+- Derive/function-first support for aliasing different flags into a single param.
+
+**Acceptance criteria:**
+- `--moored` / `--drifting` map into one typed parameter without manual post-processing.
+- Help output and parsing behavior match parity expectations.
+
+### Estimated LoC Impact (API only, before rewrites)
+
+Expected reduction after E1–E4 are implemented and then applied to examples:
+
+| Example | Current LoC | Estimated Post-E1..E4 | Expected Delta |
+|---------|-------------|------------------------|----------------|
+| naval | 292 | 120–150 | -140 to -170 |
+| validation | 198 | 80–100 | -98 to -118 |
+| inout | 103 | 45–60 | -43 to -58 |
+| colors | 146 | 70–90 | -56 to -76 |
+| termui | 337 | 240–280 | -57 to -97 |
+| repo | 385 | 280–330 | -55 to -105 |
+| aliases | 431 | 340–390 | -41 to -91 |
+| complex | 210 | 150–180 | -30 to -60 |
+
+Projected aggregate reduction across examples: **~520–780 LoC** (ratio target trend: **2.31x → ~1.7x–1.9x** before deeper DSL work).
+
+### Execution Order
+
+1. **E4 first** (smallest surface, unblocks high `naval` delta).
+2. **E2 second** (high impact in `validation` + `inout`).
+3. **E3 third** (finishes `validation` declarative path).
+4. **E1 last** (largest macro surface; apply after param model stabilizes).
+
+### Tracking Notes
+
+- No broad example rewrites until E1–E4 land.
+- After each E-track, migrate only one representative example and re-measure LoC.
+- Keep parity coverage updated alongside each API addition.
 
 ## Milestones
 

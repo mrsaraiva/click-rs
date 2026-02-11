@@ -185,8 +185,6 @@ fn build_mine_group() -> Group {
 
 /// Build the `mine set` command.
 fn build_mine_set_command() -> Command {
-    // In Python Click, --moored and --drifting both set the same 'ty' parameter.
-    // click-rs doesn't have flag_value groups, so we use separate options.
     Command::new("set")
         .help("Sets a mine at a specific coordinate.")
         .argument(
@@ -201,13 +199,16 @@ fn build_mine_set_command() -> Command {
         )
         .option(
             ClickOption::new(&["--moored", "-m"])
-                .flag("true")
+                .dest("ty")
+                .flag("moored")
+                .default("moored")
                 .help("Moored (anchored) mine. Default.")
                 .build(),
         )
         .option(
             ClickOption::new(&["--drifting", "-d"])
-                .flag("true")
+                .dest("ty")
+                .flag("drifting")
                 .help("Drifting mine.")
                 .build(),
         )
@@ -231,13 +232,10 @@ fn mine_set_callback(ctx: &Context) -> Result<()> {
         .parse()
         .map_err(|_| ClickError::usage(format!("'{}' is not a valid float.", y)))?;
 
-    // Determine mine type - drifting takes precedence if specified
-    let is_drifting = ctx
-        .get_param::<String>("drifting")
-        .map(|s| s == "true")
-        .unwrap_or(false);
-
-    let mine_type = if is_drifting { "drifting" } else { "moored" };
+    let mine_type = ctx
+        .get_param::<String>("ty")
+        .map(|s| s.as_str())
+        .unwrap_or("moored");
 
     println!("Set {} mine at {},{}", mine_type, x_val, y_val);
     Ok(())

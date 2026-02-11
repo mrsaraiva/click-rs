@@ -2001,6 +2001,69 @@ mod tests {
         assert_eq!(opt, Some(&"flagval".to_string()));
     }
 
+    #[test]
+    fn test_flag_value_group_shared_destination() {
+        let cmd = Command::new("mine")
+            .option(
+                ClickOption::new(&["--moored", "-m"])
+                    .dest("ty")
+                    .flag("moored")
+                    .default("moored")
+                    .build(),
+            )
+            .option(
+                ClickOption::new(&["--drifting", "-d"])
+                    .dest("ty")
+                    .flag("drifting")
+                    .build(),
+            )
+            .build();
+
+        let ctx_default = cmd.make_context("mine", vec![], None).unwrap();
+        assert_eq!(ctx_default.get_param::<String>("ty"), Some(&"moored".to_string()));
+
+        let ctx_drifting = cmd
+            .make_context("mine", vec!["--drifting".to_string()], None)
+            .unwrap();
+        assert_eq!(
+            ctx_drifting.get_param::<String>("ty"),
+            Some(&"drifting".to_string())
+        );
+
+        let ctx_moored = cmd
+            .make_context("mine", vec!["--moored".to_string()], None)
+            .unwrap();
+        assert_eq!(ctx_moored.get_param::<String>("ty"), Some(&"moored".to_string()));
+    }
+
+    #[test]
+    fn test_flag_value_group_last_option_wins() {
+        let cmd = Command::new("mine")
+            .option(
+                ClickOption::new(&["--moored"])
+                    .dest("ty")
+                    .flag("moored")
+                    .default("moored")
+                    .build(),
+            )
+            .option(
+                ClickOption::new(&["--drifting"])
+                    .dest("ty")
+                    .flag("drifting")
+                    .build(),
+            )
+            .build();
+
+        let ctx = cmd
+            .make_context(
+                "mine",
+                vec!["--moored".to_string(), "--drifting".to_string()],
+                None,
+            )
+            .unwrap();
+        assert_eq!(ctx.get_param::<String>("ty"), Some(&"drifting".to_string()));
+    }
+
     // -------------------------------------------------------------------------
     // Eager option (--help) tests
     // -------------------------------------------------------------------------

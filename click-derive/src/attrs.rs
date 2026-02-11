@@ -39,6 +39,29 @@ fn parse_names_expr(expr: Expr) -> Result<Vec<String>> {
     }
 }
 
+fn parse_i32_expr(expr: Expr) -> Result<i32> {
+    match expr {
+        Expr::Lit(ExprLit {
+            lit: Lit::Int(i), ..
+        }) => i.base10_parse::<i32>(),
+        Expr::Unary(unary) => {
+            if matches!(unary.op, syn::UnOp::Neg(_)) {
+                if let Expr::Lit(ExprLit {
+                    lit: Lit::Int(i), ..
+                }) = *unary.expr
+                {
+                    return i.base10_parse::<i32>().map(|v| -v);
+                }
+            }
+            Err(syn::Error::new_spanned(unary, "nargs must be an integer literal"))
+        }
+        other => Err(syn::Error::new_spanned(
+            other,
+            "nargs must be an integer literal",
+        )),
+    }
+}
+
 // =============================================================================
 // Version Option Attributes
 // =============================================================================
@@ -309,6 +332,7 @@ pub struct CommandAttr {
     pub help: Option<String>,
     pub short_help: Option<String>,
     pub epilog: Option<String>,
+    pub run: bool,
     pub hidden: bool,
     pub deprecated: Option<String>,
     pub no_args_is_help: bool,
@@ -359,6 +383,9 @@ impl CommandAttr {
                     let _: Token![=] = meta.input.parse()?;
                     let lit: LitStr = meta.input.parse()?;
                     self.epilog = Some(lit.value());
+                }
+                Some("run") => {
+                    self.run = true;
                 }
                 Some("hidden") => {
                     self.hidden = true;
@@ -470,6 +497,9 @@ impl GroupAttr {
                 Some("hidden") => {
                     self.command.hidden = true;
                 }
+                Some("run") => {
+                    self.command.run = true;
+                }
                 _ => {
                     return Err(meta.error(format!("unknown group attribute: {:?}", ident)));
                 }
@@ -518,8 +548,13 @@ pub struct OptionAttr {
     pub show_default: bool,
     pub show_envvar: bool,
     pub metavar: Option<String>,
+    pub nargs: Option<i32>,
     pub type_name: Option<String>,
+    pub type_expr: Option<TokenStream>,
     pub value_name: Option<String>,
+    pub dest: Option<String>,
+    pub validate: Option<TokenStream>,
+    pub shell_complete: Option<TokenStream>,
 }
 
 impl OptionAttr {
@@ -609,15 +644,42 @@ impl OptionAttr {
                     let lit: LitStr = meta.input.parse()?;
                     result.metavar = Some(lit.value());
                 }
+                Some("nargs") => {
+                    let _: Token![=] = meta.input.parse()?;
+                    let expr: Expr = meta.input.parse()?;
+                    result.nargs = Some(parse_i32_expr(expr)?);
+                }
                 Some("type") | Some("type_name") => {
                     let _: Token![=] = meta.input.parse()?;
-                    let lit: LitStr = meta.input.parse()?;
-                    result.type_name = Some(lit.value());
+                    let expr: Expr = meta.input.parse()?;
+                    if let Expr::Lit(ExprLit {
+                        lit: Lit::Str(s), ..
+                    }) = &expr
+                    {
+                        result.type_name = Some(s.value());
+                    } else {
+                        result.type_expr = Some(quote! { #expr });
+                    }
                 }
                 Some("value_name") => {
                     let _: Token![=] = meta.input.parse()?;
                     let lit: LitStr = meta.input.parse()?;
                     result.value_name = Some(lit.value());
+                }
+                Some("dest") | Some("param") => {
+                    let _: Token![=] = meta.input.parse()?;
+                    let lit: LitStr = meta.input.parse()?;
+                    result.dest = Some(lit.value());
+                }
+                Some("validate") => {
+                    let _: Token![=] = meta.input.parse()?;
+                    let expr: Expr = meta.input.parse()?;
+                    result.validate = Some(quote! { #expr });
+                }
+                Some("shell_complete") => {
+                    let _: Token![=] = meta.input.parse()?;
+                    let expr: Expr = meta.input.parse()?;
+                    result.shell_complete = Some(quote! { #expr });
                 }
                 _ => {
                     return Err(meta.error(format!("unknown option attribute: {:?}", ident)));
@@ -641,8 +703,12 @@ pub struct ArgumentAttr {
     pub default: Option<TokenStream>,
     pub default_str: Option<String>,
     pub metavar: Option<String>,
+    pub nargs: Option<i32>,
     pub envvar: Option<String>,
     pub type_name: Option<String>,
+    pub type_expr: Option<TokenStream>,
+    pub validate: Option<TokenStream>,
+    pub shell_complete: Option<TokenStream>,
 }
 
 impl ArgumentAttr {
@@ -689,6 +755,11 @@ impl ArgumentAttr {
                     let lit: LitStr = meta.input.parse()?;
                     result.metavar = Some(lit.value());
                 }
+                Some("nargs") => {
+                    let _: Token![=] = meta.input.parse()?;
+                    let expr: Expr = meta.input.parse()?;
+                    result.nargs = Some(parse_i32_expr(expr)?);
+                }
                 Some("envvar") => {
                     let _: Token![=] = meta.input.parse()?;
                     let lit: LitStr = meta.input.parse()?;
@@ -696,8 +767,25 @@ impl ArgumentAttr {
                 }
                 Some("type") | Some("type_name") => {
                     let _: Token![=] = meta.input.parse()?;
-                    let lit: LitStr = meta.input.parse()?;
-                    result.type_name = Some(lit.value());
+                    let expr: Expr = meta.input.parse()?;
+                    if let Expr::Lit(ExprLit {
+                        lit: Lit::Str(s), ..
+                    }) = &expr
+                    {
+                        result.type_name = Some(s.value());
+                    } else {
+                        result.type_expr = Some(quote! { #expr });
+                    }
+                }
+                Some("validate") => {
+                    let _: Token![=] = meta.input.parse()?;
+                    let expr: Expr = meta.input.parse()?;
+                    result.validate = Some(quote! { #expr });
+                }
+                Some("shell_complete") => {
+                    let _: Token![=] = meta.input.parse()?;
+                    let expr: Expr = meta.input.parse()?;
+                    result.shell_complete = Some(quote! { #expr });
                 }
                 _ => {
                     return Err(meta.error(format!("unknown argument attribute: {:?}", ident)));

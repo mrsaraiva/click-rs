@@ -1,6 +1,7 @@
 //! Integration tests for the derive macros.
 
 use click_derive::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A simple greeter command
 #[derive(Command)]
@@ -236,7 +237,205 @@ fn test_hidden_option() {
     assert!(!help.contains("--secret"), "Help should not contain hidden option");
 }
 
+static AUTO_RUN_CALLED: AtomicBool = AtomicBool::new(false);
+
+#[derive(Command)]
+#[command(name = "auto-run", run)]
+struct AutoRunCmd {
+    #[argument(required = false)]
+    #[allow(dead_code)]
+    input: Option<String>,
+}
+
+impl AutoRunCmd {
+    fn run(&self, _ctx: &click::Context) -> click::Result<()> {
+        AUTO_RUN_CALLED.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+#[test]
+fn test_command_run_attribute_wires_callback() {
+    AUTO_RUN_CALLED.store(false, Ordering::SeqCst);
+    let cmd = AutoRunCmd::command();
+    assert!(cmd.callback.is_some());
+    cmd.main(vec![]).unwrap();
+    assert!(AUTO_RUN_CALLED.load(Ordering::SeqCst));
+}
+
+#[click::command(name = "fn-greet", help = "Function macro test command")]
+fn fn_greet(
+    #[argument] name: String,
+    #[option(short, long, default = 1)] count: i32,
+) -> click::Result<()> {
+    for _ in 0..count {
+        let _ = &name;
+    }
+    Ok(())
+}
+
+#[test]
+fn test_function_command_attribute_macro() {
+    let cmd = fn_greet_command();
+    assert_eq!(cmd.name.as_deref(), Some("fn-greet"));
+    assert!(cmd.main(vec![]).is_err());
+    assert!(cmd.main(vec!["--count".to_string(), "2".to_string(), "Bob".to_string()]).is_ok());
+}
+
 // Note: Environment variable support in options is defined at the struct level
 // but full envvar parsing integration requires additional work in the parser.
 // The derive macro sets up the envvar attribute correctly; the parser needs
 // to be enhanced to read from environment variables when CLI args are missing.
+
+fn complete_names(_ctx: &click::Context, incomplete: &str) -> Vec<click::CompletionItem> {
+    ["alice", "bob", "charlie"]
+        .into_iter()
+        .filter(|name| name.starts_with(incomplete))
+        .map(click::CompletionItem::new)
+        .collect()
+}
+
+fn complete_envs(_ctx: &click::Context, incomplete: &str) -> Vec<click::CompletionItem> {
+    ["HOME", "HOSTNAME", "PATH"]
+        .into_iter()
+        .filter(|name| name.starts_with(incomplete))
+        .map(click::CompletionItem::new)
+        .collect()
+}
+
+#[derive(Command)]
+#[command(name = "complete-me")]
+struct DerivedShellComplete {
+    #[argument(shell_complete = complete_names)]
+    #[allow(dead_code)]
+    name: String,
+
+    #[option(long, shell_complete = complete_envs)]
+    #[allow(dead_code)]
+    env: Option<String>,
+}
+
+#[test]
+fn test_derive_shell_complete_attributes() {
+    let cmd = DerivedShellComplete::command();
+
+    let arg_completions = click::completion::get_completions(&cmd, "complete-me", &[], "a");
+    assert!(arg_completions.iter().any(|c| c.value == "alice"));
+
+    let opt_value_completions = click::completion::get_completions(
+        &cmd,
+        "complete-me",
+        &["--env".to_string()],
+        "HO",
+    );
+    assert!(opt_value_completions.iter().any(|c| c.value == "HOME"));
+    assert!(opt_value_completions.iter().any(|c| c.value == "HOSTNAME"));
+}
+
+#[derive(Command)]
+#[command(name = "dest-opt")]
+struct DestOptionCmd {
+    #[option(long = "actual-name", dest = "alias_name")]
+    alias_name: String,
+}
+
+#[test]
+fn test_derive_option_dest_attribute() {
+    let cmd = DestOptionCmd::command();
+    let ctx = cmd
+        .make_context(
+            "dest-opt",
+            vec!["--actual-name".to_string(), "value".to_string()],
+            None,
+        )
+        .unwrap();
+
+    let parsed = DestOptionCmd::from_context(&ctx).unwrap();
+    assert_eq!(parsed.alias_name, "value");
+}
+
+#[derive(Command)]
+#[command(name = "typed-adapters")]
+struct TypedAdaptersCmd {
+    #[argument(nargs = -1, type = click::INT)]
+    nums: Vec<i64>,
+
+    #[option(long, type = click::INT)]
+    limit: i64,
+}
+
+#[test]
+fn test_derive_type_and_nargs_adapters() {
+    let cmd = TypedAdaptersCmd::command();
+    let ctx = cmd
+        .make_context(
+            "typed-adapters",
+            vec![
+                "--limit".to_string(),
+                "5".to_string(),
+                "10".to_string(),
+                "20".to_string(),
+                "30".to_string(),
+            ],
+            None,
+        )
+        .unwrap();
+
+    let parsed = TypedAdaptersCmd::from_context(&ctx).unwrap();
+    assert_eq!(parsed.limit, 5);
+    assert_eq!(parsed.nums, vec![10, 20, 30]);
+}
+
+fn validate_even_count(value: &i64) -> std::result::Result<(), String> {
+    if *value > 0 && *value % 2 == 0 {
+        Ok(())
+    } else {
+        Err("Should be a positive, even integer.".to_string())
+    }
+}
+
+fn validate_nonempty_name(value: &String) -> std::result::Result<(), String> {
+    if value.trim().is_empty() {
+        Err("Name cannot be empty".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+#[derive(Command)]
+#[command(name = "validated")]
+struct ValidatedCmd {
+    #[option(long, type = click::INT, validate = validate_even_count)]
+    count: i64,
+
+    #[argument(validate = validate_nonempty_name)]
+    name: String,
+}
+
+#[test]
+fn test_declarative_validators_success() {
+    let cmd = ValidatedCmd::command();
+    let ctx = cmd
+        .make_context(
+            "validated",
+            vec!["--count".to_string(), "4".to_string(), "alice".to_string()],
+            None,
+        )
+        .unwrap();
+    let parsed = ValidatedCmd::from_context(&ctx).unwrap();
+    assert_eq!(parsed.count, 4);
+    assert_eq!(parsed.name, "alice");
+}
+
+#[test]
+fn test_declarative_validators_failure() {
+    let cmd = ValidatedCmd::command();
+    let err = cmd
+        .make_context(
+            "validated",
+            vec!["--count".to_string(), "3".to_string(), "alice".to_string()],
+            None,
+        )
+        .unwrap_err();
+    assert!(err.to_string().contains("positive, even integer"));
+}

@@ -115,6 +115,7 @@ pub fn expand_command(input: DeriveInput) -> Result<TokenStream> {
     let allow_extra_args = cmd_attr.allow_extra_args;
     let allow_interspersed_args = cmd_attr.allow_interspersed_args;
     let ignore_unknown_options = cmd_attr.ignore_unknown_options;
+    let auto_run = cmd_attr.run;
 
     // hidden() takes no args, so conditionally add it
     let hidden_opt = if cmd_attr.hidden {
@@ -139,6 +140,17 @@ pub fn expand_command(input: DeriveInput) -> Result<TokenStream> {
         None => quote! {},
     };
 
+    let auto_run_callback_opt = if auto_run {
+        quote! {
+            .callback(|ctx| {
+                let instance = #name::from_context(ctx)?;
+                instance.run(ctx)
+            })
+        }
+    } else {
+        quote! {}
+    };
+
     let output = quote! {
         impl #name {
             /// Build a click Command from this struct's definition.
@@ -157,6 +169,7 @@ pub fn expand_command(input: DeriveInput) -> Result<TokenStream> {
                     #(#option_builders)*
                     #(#argument_builders)*
                     #(#convenience_option_builders)*
+                    #auto_run_callback_opt
                     .build()
             }
 
@@ -391,7 +404,9 @@ fn generate_option_builders(fields: &[FieldInfo]) -> Result<Vec<TokenStream>> {
 
             // Handle is_flag (for bool types)
             let is_flag = opt_attr.is_flag || is_bool_type(field_ty);
-            let flag_opt = if is_flag && !opt_attr.is_count {
+            let flag_opt = if let Some(flag_value) = &opt_attr.flag_value {
+                quote! { .flag(#flag_value) }
+            } else if is_flag && !opt_attr.is_count {
                 quote! { .bool_flag() }
             } else {
                 quote! {}
@@ -431,6 +446,69 @@ fn generate_option_builders(fields: &[FieldInfo]) -> Result<Vec<TokenStream>> {
                 None => quote! {},
             };
 
+            // Handle nargs
+            let nargs_opt = match opt_attr.nargs {
+                Some(-1) => quote! { .nargs(click::Nargs::Variadic) },
+                Some(n) if n >= 0 => quote! { .nargs(click::Nargs::Count(#n as usize)) },
+                Some(other) => {
+                    return Err(Error::new_spanned(
+                        field_name,
+                        format!("unsupported option nargs value: {}", other),
+                    ))
+                }
+                None => quote! {},
+            };
+
+            // Handle explicit type converter expression
+            let type_opt = match &opt_attr.type_expr {
+                Some(expr) => quote! { .type_any(#expr) },
+                None => quote! {},
+            };
+
+            // Handle validator callback
+            let validate_opt = match &opt_attr.validate {
+                Some(validator) => {
+                    let validator_ty = if is_option_type(field_ty) {
+                        let inner = extract_inner_type(field_ty).ok_or_else(|| {
+                            Error::new_spanned(field_ty, "#[option(validate = ...)] requires Option<T> to use a concrete T")
+                        })?;
+                        quote! { #inner }
+                    } else {
+                        quote! { #field_ty }
+                    };
+
+                    quote! {
+                        .callback(|_ctx, param, value| {
+                            let __typed = value
+                                .downcast_ref::<#validator_ty>()
+                                .ok_or_else(|| {
+                                    click::ClickError::bad_parameter_named(
+                                        "validator type mismatch for parameter value",
+                                        param.human_readable_name(),
+                                    )
+                                })?;
+                            let __validator: fn(&#validator_ty) -> std::result::Result<(), String> = #validator;
+                            __validator(__typed).map_err(|msg| {
+                                click::ClickError::bad_parameter_named(msg, param.human_readable_name())
+                            })?;
+                            Ok(value)
+                        })
+                    }
+                }
+                None => quote! {},
+            };
+
+            let dest_opt = match &opt_attr.dest {
+                Some(d) => quote! { .dest(#d) },
+                None => quote! {},
+            };
+
+            // Handle custom shell completion callback
+            let shell_complete_opt = match &opt_attr.shell_complete {
+                Some(cb) => quote! { .shell_complete(#cb) },
+                None => quote! {},
+            };
+
             builders.push(quote! {
                 .option(
                     click::ClickOption::new(&[#(#names_arr),*])
@@ -444,6 +522,11 @@ fn generate_option_builders(fields: &[FieldInfo]) -> Result<Vec<TokenStream>> {
                         #envvar_opt
                         #show_default_opt
                         #metavar_opt
+                        #nargs_opt
+                        #type_opt
+                        #dest_opt
+                        #validate_opt
+                        #shell_complete_opt
                         .build()
                 )
             });
@@ -506,6 +589,65 @@ fn generate_argument_builders(fields: &[FieldInfo]) -> Result<Vec<TokenStream>> 
                 None => quote! {},
             };
 
+            // Handle nargs
+            let nargs_opt = match arg_attr.nargs {
+                Some(-1) => quote! { .nargs(click::Nargs::Variadic) },
+                Some(1) => quote! { .nargs(click::Nargs::Count(1)) },
+                Some(0) => quote! { .nargs(click::Nargs::Count(0)) },
+                Some(other) => {
+                    return Err(Error::new_spanned(
+                        field_name,
+                        format!("unsupported argument nargs value: {}", other),
+                    ))
+                }
+                None => quote! {},
+            };
+
+            // Handle explicit type converter expression
+            let type_opt = match &arg_attr.type_expr {
+                Some(expr) => quote! { .type_(#expr) },
+                None => quote! {},
+            };
+
+            // Handle validator callback
+            let validate_opt = match &arg_attr.validate {
+                Some(validator) => {
+                    let validator_ty = if is_option_type(field_ty) {
+                        let inner = extract_inner_type(field_ty).ok_or_else(|| {
+                            Error::new_spanned(field_ty, "#[argument(validate = ...)] requires Option<T> to use a concrete T")
+                        })?;
+                        quote! { #inner }
+                    } else {
+                        quote! { #field_ty }
+                    };
+
+                    quote! {
+                        .callback(|_ctx, param, value| {
+                            let __typed = value
+                                .downcast_ref::<#validator_ty>()
+                                .ok_or_else(|| {
+                                    click::ClickError::bad_parameter_named(
+                                        "validator type mismatch for parameter value",
+                                        param.human_readable_name(),
+                                    )
+                                })?;
+                            let __validator: fn(&#validator_ty) -> std::result::Result<(), String> = #validator;
+                            __validator(__typed).map_err(|msg| {
+                                click::ClickError::bad_parameter_named(msg, param.human_readable_name())
+                            })?;
+                            Ok(value)
+                        })
+                    }
+                }
+                None => quote! {},
+            };
+
+            // Handle custom shell completion callback
+            let shell_complete_opt = match &arg_attr.shell_complete {
+                Some(cb) => quote! { .shell_complete(#cb) },
+                None => quote! {},
+            };
+
             builders.push(quote! {
                 .argument(
                     click::Argument::new(#field_name_str)
@@ -516,6 +658,10 @@ fn generate_argument_builders(fields: &[FieldInfo]) -> Result<Vec<TokenStream>> 
                         #default_opt
                         #envvar_opt
                         #metavar_opt
+                        #nargs_opt
+                        #type_opt
+                        #validate_opt
+                        #shell_complete_opt
                         .build()
                 )
             });
@@ -536,7 +682,9 @@ fn generate_field_extractions(fields: &[FieldInfo]) -> Result<Vec<TokenStream>> 
 
         match &field.attr {
             FieldAttr::Option(opt_attr) => {
-                let extraction = generate_option_extraction(field_name, &field_name_str, field_ty, opt_attr)?;
+                let option_key = opt_attr.dest.as_deref().unwrap_or(&field_name_str);
+                let extraction =
+                    generate_option_extraction(field_name, option_key, field_ty, opt_attr)?;
                 extractions.push(extraction);
             }
             FieldAttr::Argument(arg_attr) => {
@@ -599,23 +747,25 @@ fn generate_field_extractions(fields: &[FieldInfo]) -> Result<Vec<TokenStream>> 
 /// Generate extraction code for an option field
 fn generate_option_extraction(
     field_name: &Ident,
-    field_name_str: &str,
+    option_name: &str,
     field_ty: &Type,
     opt_attr: &OptionAttr,
 ) -> Result<TokenStream> {
+    let use_typed = opt_attr.type_expr.is_some();
+
     // For count options
     if opt_attr.is_count {
         return Ok(quote! {
-            let #field_name = ctx.get_param::<usize>(#field_name_str)
+            let #field_name = ctx.get_param::<usize>(#option_name)
                 .cloned()
                 .unwrap_or(0) as #field_ty;
         });
     }
 
     // For flag options (bool)
-    if opt_attr.is_flag || is_bool_type(field_ty) {
+    if (opt_attr.is_flag || is_bool_type(field_ty)) && opt_attr.flag_value.is_none() {
         return Ok(quote! {
-            let #field_name = ctx.get_param::<bool>(#field_name_str)
+            let #field_name = ctx.get_param::<bool>(#option_name)
                 .cloned()
                 .unwrap_or(false);
         });
@@ -623,9 +773,15 @@ fn generate_option_extraction(
 
     // For Vec types
     if is_vec_type(field_ty) {
-        let _inner_ty = extract_inner_type(field_ty);
+        if use_typed {
+            return Ok(quote! {
+                let #field_name = ctx.get_param::<#field_ty>(#option_name)
+                    .cloned()
+                    .unwrap_or_default();
+            });
+        }
         return Ok(quote! {
-            let #field_name = ctx.get_param::<Vec<String>>(#field_name_str)
+            let #field_name = ctx.get_param::<Vec<String>>(#option_name)
                 .cloned()
                 .map(|v| {
                     v.into_iter()
@@ -638,16 +794,31 @@ fn generate_option_extraction(
 
     // For Option types
     if is_option_type(field_ty) {
+        if use_typed {
+            let inner_ty = extract_inner_type(field_ty).ok_or_else(|| {
+                Error::new_spanned(field_ty, "#[option(type = ...)] with Option<T> requires concrete T")
+            })?;
+            return Ok(quote! {
+                let #field_name = ctx.get_param::<#inner_ty>(#option_name).cloned();
+            });
+        }
         return Ok(quote! {
-            let #field_name = ctx.get_param::<String>(#field_name_str)
+            let #field_name = ctx.get_param::<String>(#option_name)
                 .and_then(|s| s.parse().ok());
         });
     }
 
     // For regular types with defaults
     if let Some(default_expr) = &opt_attr.default {
+        if use_typed {
+            return Ok(quote! {
+                let #field_name = ctx.get_param::<#field_ty>(#option_name)
+                    .cloned()
+                    .unwrap_or(#default_expr);
+            });
+        }
         return Ok(quote! {
-            let #field_name = ctx.get_param::<String>(#field_name_str)
+            let #field_name = ctx.get_param::<String>(#option_name)
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(#default_expr);
         });
@@ -655,19 +826,32 @@ fn generate_option_extraction(
 
     // For required options
     if opt_attr.required {
+        if use_typed {
+            return Ok(quote! {
+                let #field_name = ctx.get_param::<#field_ty>(#option_name)
+                    .cloned()
+                    .ok_or_else(|| click::ClickError::MissingParameter {
+                        message: None,
+                        param_name: Some(#option_name.to_string()),
+                        param_hint: None,
+                        param_type: click::ParamType::Option,
+                        ctx: None,
+                    })?;
+            });
+        }
         return Ok(quote! {
-            let #field_name = ctx.get_param::<String>(#field_name_str)
+            let #field_name = ctx.get_param::<String>(#option_name)
                 .ok_or_else(|| click::ClickError::MissingParameter {
                     message: None,
-                    param_name: Some(#field_name_str.to_string()),
+                    param_name: Some(#option_name.to_string()),
                     param_hint: None,
                     param_type: click::ParamType::Option,
                     ctx: None,
                 })?
                 .parse()
                 .map_err(|_| click::ClickError::BadParameter {
-                    message: format!("Invalid value for '{}'", #field_name_str),
-                    param_name: Some(#field_name_str.to_string()),
+                    message: format!("Invalid value for '{}'", #option_name),
+                    param_name: Some(#option_name.to_string()),
                     param_hint: None,
                     ctx: None,
                 })?;
@@ -675,8 +859,15 @@ fn generate_option_extraction(
     }
 
     // Default case - try to get or use Default::default()
+    if use_typed {
+        return Ok(quote! {
+            let #field_name = ctx.get_param::<#field_ty>(#option_name)
+                .cloned()
+                .unwrap_or_default();
+        });
+    }
     Ok(quote! {
-        let #field_name = ctx.get_param::<String>(#field_name_str)
+        let #field_name = ctx.get_param::<String>(#option_name)
             .and_then(|s| s.parse().ok())
             .unwrap_or_default();
     })
@@ -689,8 +880,17 @@ fn generate_argument_extraction(
     field_ty: &Type,
     arg_attr: &ArgumentAttr,
 ) -> Result<TokenStream> {
+    let use_typed = arg_attr.type_expr.is_some();
+
     // For Vec types
     if is_vec_type(field_ty) || arg_attr.multiple {
+        if use_typed {
+            return Ok(quote! {
+                let #field_name = ctx.get_param::<#field_ty>(#field_name_str)
+                    .cloned()
+                    .unwrap_or_default();
+            });
+        }
         return Ok(quote! {
             let #field_name = ctx.get_param::<Vec<String>>(#field_name_str)
                 .cloned()
@@ -705,6 +905,14 @@ fn generate_argument_extraction(
 
     // For Option types
     if is_option_type(field_ty) {
+        if use_typed {
+            let inner_ty = extract_inner_type(field_ty).ok_or_else(|| {
+                Error::new_spanned(field_ty, "#[argument(type = ...)] with Option<T> requires concrete T")
+            })?;
+            return Ok(quote! {
+                let #field_name = ctx.get_param::<#inner_ty>(#field_name_str).cloned();
+            });
+        }
         return Ok(quote! {
             let #field_name = ctx.get_param::<String>(#field_name_str)
                 .and_then(|s| s.parse().ok());
@@ -713,6 +921,13 @@ fn generate_argument_extraction(
 
     // For arguments with defaults
     if let Some(default_expr) = &arg_attr.default {
+        if use_typed {
+            return Ok(quote! {
+                let #field_name = ctx.get_param::<#field_ty>(#field_name_str)
+                    .cloned()
+                    .unwrap_or(#default_expr);
+            });
+        }
         return Ok(quote! {
             let #field_name = ctx.get_param::<String>(#field_name_str)
                 .and_then(|s| s.parse().ok())
@@ -723,6 +938,19 @@ fn generate_argument_extraction(
     // Required is the default for arguments
     let is_required = arg_attr.required.unwrap_or(true);
     if is_required {
+        if use_typed {
+            return Ok(quote! {
+                let #field_name = ctx.get_param::<#field_ty>(#field_name_str)
+                    .cloned()
+                    .ok_or_else(|| click::ClickError::MissingParameter {
+                        message: None,
+                        param_name: Some(#field_name_str.to_string()),
+                        param_hint: None,
+                        param_type: click::ParamType::Argument,
+                        ctx: None,
+                    })?;
+            });
+        }
         return Ok(quote! {
             let #field_name = ctx.get_param::<String>(#field_name_str)
                 .ok_or_else(|| click::ClickError::MissingParameter {
@@ -743,6 +971,13 @@ fn generate_argument_extraction(
     }
 
     // Optional argument
+    if use_typed {
+        return Ok(quote! {
+            let #field_name = ctx.get_param::<#field_ty>(#field_name_str)
+                .cloned()
+                .unwrap_or_default();
+        });
+    }
     Ok(quote! {
         let #field_name = ctx.get_param::<String>(#field_name_str)
             .and_then(|s| s.parse().ok())

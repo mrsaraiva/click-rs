@@ -68,6 +68,7 @@
 
 pub mod argument;
 pub mod command;
+pub mod complete;
 pub mod completion;
 pub mod context;
 pub mod decorators;
@@ -94,6 +95,36 @@ pub use parameter::{DeprecationInfo, Nargs, Parameter, ParameterConfig};
 pub use parser::{split_opt, OptionAction, OptionParser, ParseResult, ParsedValue};
 pub use source::ParameterSource;
 
+/// Run a command/group with explicit arguments.
+pub fn try_run<I>(cmd: &dyn CommandLike, args: I) -> Result<()>
+where
+    I: IntoIterator<Item = String>,
+{
+    cmd.main(args.into_iter().collect())
+}
+
+/// Run a command/group with process arguments and standard Click-style error handling.
+///
+/// This helper prints formatted errors and exits with the command's exit code.
+pub fn run(cmd: &dyn CommandLike) {
+    if let Err(e) = try_run(cmd, std::env::args().skip(1)) {
+        eprintln!("{}", e.format_full());
+        std::process::exit(e.exit_code());
+    }
+}
+
+/// Run a command/group with optional shell-completion handling.
+///
+/// If completion is requested via `complete_var`, completion output is handled and this
+/// function returns immediately. Otherwise, it behaves like [`run`].
+pub fn run_with_completion(cmd: &dyn CommandLike, prog_name: &str, complete_var: &str) {
+    let completion_opt = completion::make_completion_option(complete_var);
+    if completion_opt.handle_completion(cmd, prog_name) {
+        return;
+    }
+    run(cmd);
+}
+
 // Re-export formatting utilities
 pub use formatting::{
     detect_terminal_width, get_terminal_width, make_rule, split_into_lines, truncate_text,
@@ -102,7 +133,7 @@ pub use formatting::{
 
 // Re-export derive macros when "derive" feature is enabled
 #[cfg(feature = "derive")]
-pub use click_derive::{Command, Group};
+pub use click_derive::{command, Command, Group};
 
 // Re-export type converter trait and common types
 pub use types::{

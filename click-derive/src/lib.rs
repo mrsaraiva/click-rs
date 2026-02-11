@@ -32,13 +32,15 @@
 //! ```
 
 use proc_macro::TokenStream;
-use syn::{parse_macro_input, DeriveInput};
+use syn::{parse_macro_input, DeriveInput, ItemFn};
 
 mod attrs;
 mod command;
+mod function;
 mod group;
 
 use command::expand_command;
+use function::expand_command_fn;
 use group::expand_group;
 
 /// Derive macro for creating CLI commands from structs.
@@ -47,6 +49,7 @@ use group::expand_group;
 ///
 /// - `#[command(name = "...")]` - Set the command name (defaults to struct name in kebab-case)
 /// - `#[command(help = "...")]` - Set the help text (defaults to doc comment)
+/// - `#[command(run)]` - Wire `Self::run(&self|self, &Context) -> Result<()>` as callback
 /// - `#[command(hidden)]` - Hide the command from help
 /// - `#[command(no_args_is_help)]` - Show help when no arguments provided
 ///
@@ -62,7 +65,12 @@ use group::expand_group;
 /// - `#[option(required)]` - Mark as required
 /// - `#[option(count)]` - Count occurrences (-v -v -v = 3)
 /// - `#[option(flag)]` - Boolean flag (no value)
+/// - `#[option(nargs = -1)]` - Variadic option values
+/// - `#[option(type = click::PathType::new())]` - Explicit converter expression
+/// - `#[option(validate = my_validator)]` - Declarative validation (`fn(&T) -> Result<(), String>`)
 /// - `#[option(envvar = "VAR")]` - Read from environment variable
+/// - `#[option(dest = "name")]` - Override destination parameter name
+/// - `#[option(shell_complete = my_completer)]` - Custom value completion callback
 ///
 /// ## Arguments
 ///
@@ -70,6 +78,10 @@ use group::expand_group;
 /// - `#[argument(help = "...")]` - Set help text
 /// - `#[argument(required = false)]` - Optional argument
 /// - `#[argument(multiple)]` - Accept multiple values
+/// - `#[argument(nargs = -1)]` - Variadic argument values
+/// - `#[argument(type = click::FileType::new())]` - Explicit converter expression
+/// - `#[argument(validate = my_validator)]` - Declarative validation (`fn(&T) -> Result<(), String>`)
+/// - `#[argument(shell_complete = my_completer)]` - Custom completion callback
 ///
 /// # Example
 ///
@@ -114,6 +126,7 @@ pub fn derive_command(input: TokenStream) -> TokenStream {
 ///
 /// - `#[group(name = "...")]` - Set the group name
 /// - `#[group(help = "...")]` - Set the help text
+/// - `#[group(run)]` - Wire `Self::run(&self|self, &Context) -> Result<()>` as callback
 /// - `#[group(chain)]` - Enable command chaining
 /// - `#[group(invoke_without_command)]` - Run callback even without subcommand
 ///
@@ -154,6 +167,33 @@ pub fn derive_command(input: TokenStream) -> TokenStream {
 pub fn derive_group(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     expand_group(input)
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}
+
+/// Attribute macro for function-first command definitions.
+///
+/// The annotated function parameters must use click parameter attributes such as
+/// `#[option(...)]` or `#[argument(...)]`. The macro generates:
+/// - a hidden derive-backed struct that carries the parameter metadata
+/// - a `<function_name>_command()` helper that builds a `click::Command`
+///
+/// # Example
+///
+/// ```ignore
+/// #[click::command(name = "hello")]
+/// fn hello(#[argument] name: String, #[option(short, long)] loud: bool) -> click::Result<()> {
+///     if loud { println!("HELLO, {}!", name); } else { println!("Hello, {}!", name); }
+///     Ok(())
+/// }
+///
+/// let cmd = hello_command();
+/// ```
+#[proc_macro_attribute]
+pub fn command(args: TokenStream, input: TokenStream) -> TokenStream {
+    let args = proc_macro2::TokenStream::from(args);
+    let input = parse_macro_input!(input as ItemFn);
+    expand_command_fn(args, input)
         .unwrap_or_else(|e| e.to_compile_error())
         .into()
 }
