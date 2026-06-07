@@ -42,8 +42,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "click"
-version = "0.1.0"
+name = "click-derive"
+version = "1.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "click-rs"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "click-derive",
@@ -55,15 +64,6 @@ dependencies = [
  "thiserror",
  "uuid",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "click-derive"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

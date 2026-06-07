@@ -3,15 +3,30 @@ members = [".", "click-derive"]
 exclude = ["tests/parity/phase1/rust", "tests/parity/phase2/rust", "tests/parity/phase3/rust"]
 
 [package]
-name = "click"
-version = "0.1.0"
+name = "click-rs"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.70"
 description = "A Rust port of Python's Click library for creating command-line interfaces"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/msaraiva/click-rs"
+license = "MIT"
+repository = "https://github.com/mrsaraiva/click-rs"
+documentation = "https://docs.rs/click-rs"
+readme = "README.md"
 keywords = ["cli", "command-line", "terminal", "arguments"]
 categories = ["command-line-interface"]
+exclude = [
+    ".idea/",
+    "docs/devel/",
+    "tests/parity/",
+    "tools/",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lib]
+name = "click"
 
 [dependencies]
 thiserror = "2.0"
@@ -19,7 +34,7 @@ uuid = { version = "1.0", features = ["v4", "std"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 crossterm = "0.28"
 os_pipe = "1.2"
-click-derive = { path = "./click-derive", optional = true }
+click-derive = { path = "./click-derive", version = "1.0.0", optional = true }
 encoding_rs = "0.8"
 
 [target.'cfg(unix)'.dependencies]
@@ -33,7 +48,7 @@ windows-sys = { version = "0.52", features = [
 
 [dev-dependencies]
 tempfile = "3.0"
-click-derive = { path = "./click-derive" }
+click-derive = { path = "./click-derive", version = "1.0.0" }
 
 [features]
 default = ["derive"]
