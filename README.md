@@ -7,8 +7,8 @@
 A Rust port of Python's [Click](https://github.com/pallets/click) library for creating
 beautiful command-line interfaces in a composable, declarative way.
 
-click-rs lets you build CLIs from commands, groups, options and arguments — with automatic
-help generation, prompts, colored output, shell completion, and a testing harness — using
+click-rs lets you build CLIs from commands, groups, options and arguments, with automatic
+help generation, prompts, colored output, shell completion, and a testing harness, using
 either a derive macro or a builder API.
 
 > **Attribution.** click-rs is a derivative work: a Rust port of the excellent
@@ -74,14 +74,14 @@ fn main() {
 
 ## Features
 
-- **Commands & groups** — compose nested subcommands with shared context
-- **Options & arguments** — typed parameters with defaults, flags, multiple values
-- **Automatic help** — generated usage and `--help` output
-- **Prompts & I/O** — interactive prompts, confirmation, and piped input/output
-- **Colored output** — styled terminal text
-- **Shell completion** — generate completion scripts
-- **Validation** — custom parameter validation and error reporting
-- **Testing** — a `CliRunner` harness for invoking commands in tests
+- **Commands & groups:** compose nested subcommands with shared context
+- **Options & arguments:** typed parameters with defaults, flags, multiple values
+- **Automatic help:** generated usage and `--help` output
+- **Prompts & I/O:** interactive prompts, confirmation, and piped input/output
+- **Colored output:** styled terminal text
+- **Shell completion:** generate completion scripts
+- **Validation:** custom parameter validation and error reporting
+- **Testing:** a `CliRunner` harness for invoking commands in tests
 
 ## Examples
 
