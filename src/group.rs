@@ -693,8 +693,22 @@ impl CommandLike for Group {
                 self.command.invoke(ctx)?;
             }
 
-            // Create subcommand context with proper parent inheritance
-            let sub_ctx = cmd.make_context(cmd_name, remaining, parent_arc)?;
+            // Create subcommand context with proper parent inheritance.
+            // Exit{0} here means an eager option (--help) fired during the
+            // subcommand's own parsing: mirror Command::main and render THAT
+            // subcommand's help with its full command path, instead of letting
+            // the exit bubble up and terminate silently.
+            let sub_ctx = match cmd.make_context(cmd_name, remaining, parent_arc) {
+                Ok(sub_ctx) => sub_ctx,
+                Err(ClickError::Exit { code: 0 }) => {
+                    let help_ctx = ContextBuilder::new()
+                        .info_name(format!("{} {}", ctx.command_path(), cmd_name))
+                        .build();
+                    println!("{}", cmd.get_help(&help_ctx));
+                    return Ok(());
+                }
+                Err(e) => return Err(e),
+            };
 
             // Push and invoke subcommand
             let sub_ctx_arc = Arc::new(sub_ctx);
@@ -743,17 +757,37 @@ impl CommandLike for Group {
                             )
                             .build();
 
-                        // Parse args using the command (this populates the context)
-                        if let Some(command) = cmd.as_any().downcast_ref::<Command>() {
-                            command.parse_args(&mut sub_ctx, rest)?;
+                        // Parse args using the command (this populates the context).
+                        // Exit{0} = an eager --help fired for this chain member:
+                        // render its help (full path) instead of a silent exit.
+                        let parse_result = if let Some(command) =
+                            cmd.as_any().downcast_ref::<Command>()
+                        {
+                            command.parse_args(&mut sub_ctx, rest)
                         } else if let Some(group) = cmd.as_any().downcast_ref::<Group>() {
                             // For nested groups, use make_context which handles group-specific parsing
-                            let nested_ctx =
-                                group.make_context(cmd_name, rest, parent_arc.clone())?;
-                            sub_ctx = nested_ctx;
+                            group
+                                .make_context(cmd_name, rest, parent_arc.clone())
+                                .map(|nested_ctx| {
+                                    sub_ctx = nested_ctx;
+                                })
                         } else {
                             // Fallback: use make_context (may error on extra args)
-                            sub_ctx = cmd.make_context(cmd_name, rest, parent_arc.clone())?;
+                            cmd.make_context(cmd_name, rest, parent_arc.clone())
+                                .map(|fallback_ctx| {
+                                    sub_ctx = fallback_ctx;
+                                })
+                        };
+                        match parse_result {
+                            Ok(()) => {}
+                            Err(ClickError::Exit { code: 0 }) => {
+                                let help_ctx = ContextBuilder::new()
+                                    .info_name(format!("{} {}", ctx.command_path(), cmd_name))
+                                    .build();
+                                println!("{}", cmd.get_help(&help_ctx));
+                                return Ok(());
+                            }
+                            Err(e) => return Err(e),
                         }
 
                         // The subcommand's unparsed args become input for next command

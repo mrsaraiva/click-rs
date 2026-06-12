@@ -937,8 +937,15 @@ impl Command {
     /// version options that trigger `Exit { code: 0 }`.
     pub fn get_version_output_from_args(&self, args: &[String]) -> Option<String> {
         for opt in &self.options {
-            let meta = opt.config.metavar.as_deref()?;
-            let output = meta.strip_prefix(Self::VERSION_METAVAR_PREFIX)?;
+            // NOTE: must `continue`, not `?` — `?` aborts the whole scan at the
+            // first option without a version metavar, missing --version whenever
+            // any other option precedes it in declaration order.
+            let Some(meta) = opt.config.metavar.as_deref() else {
+                continue;
+            };
+            let Some(output) = meta.strip_prefix(Self::VERSION_METAVAR_PREFIX) else {
+                continue;
+            };
 
             let mut names = opt.long.iter().chain(opt.short.iter());
             if names.any(|n| args.iter().any(|a| Self::arg_matches_opt(a, n))) {
