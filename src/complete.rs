@@ -42,7 +42,12 @@ pub fn directories(_ctx: &Context, incomplete: &str) -> Vec<CompletionItem> {
             let value = if base_dir == Path::new(".") {
                 name
             } else {
-                format!("{}{}{}", base_dir.display(), std::path::MAIN_SEPARATOR, name)
+                format!(
+                    "{}{}{}",
+                    base_dir.display(),
+                    std::path::MAIN_SEPARATOR,
+                    name
+                )
             };
             Some(CompletionItem::new(value))
         })

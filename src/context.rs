@@ -34,6 +34,20 @@ use std::sync::Arc;
 use crate::error::ClickError;
 use crate::source::ParameterSource;
 
+/// A pluggable help renderer that can be installed into a context.
+///
+/// When present, `Group::invoke` calls this instead of `cmd.get_help()` whenever a
+/// subcommand's `--help` is requested (i.e. `Exit{0}` during `make_context`).
+///
+/// The function receives the command-like object and a `Context` whose
+/// `info_name` is set to the full command path (`"cli subcommand"`), matching
+/// the context that `get_help` would receive in normal flow.
+///
+/// Installed by `ContextBuilder::help_renderer`; inherited through the parent
+/// chain by `Context::help_renderer`.
+pub type HelpRenderer =
+    Arc<dyn Fn(&dyn crate::group::CommandLike, &Context) -> String + Send + Sync>;
+
 // Thread-local context stack
 thread_local! {
     static CONTEXT_STACK: RefCell<Vec<Arc<Context>>> = const { RefCell::new(Vec::new()) };
@@ -216,6 +230,13 @@ pub struct Context {
     /// Callbacks to run when the context is closed.
     /// These are stored in a RefCell to allow mutation even with shared references.
     close_callbacks: RefCell<Vec<Box<dyn FnOnce() + Send>>>,
+
+    /// Optional pluggable help renderer.
+    ///
+    /// When set, `Group::invoke` delegates `Exit{0}` (subcommand `--help`) to this
+    /// renderer instead of calling `cmd.get_help()` directly.  Inherited through the
+    /// parent chain: if `None` on `self`, the lookup walks to the root.
+    help_renderer: Option<HelpRenderer>,
 }
 
 // Manual Debug implementation since close_callbacks contains non-Debug closures
@@ -254,6 +275,10 @@ impl std::fmt::Debug for Context {
                 "close_callbacks",
                 &format!("<{} callbacks>", self.close_callbacks.borrow().len()),
             )
+            .field(
+                "help_renderer",
+                &self.help_renderer.as_ref().map(|_| "<help_renderer>"),
+            )
             .finish()
     }
 }
@@ -282,6 +307,7 @@ impl Default for Context {
             show_default: None,
             parameter_source: HashMap::new(),
             close_callbacks: RefCell::new(Vec::new()),
+            help_renderer: None,
         }
     }
 }
@@ -479,6 +505,40 @@ impl Context {
     #[inline]
     pub fn show_default(&self) -> Option<bool> {
         self.show_default
+    }
+
+    /// Get the pluggable help renderer, walking up the parent chain.
+    ///
+    /// Returns a reference to the first renderer found while walking from
+    /// `self` toward the root context.  Returns `None` if none was installed.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use click::context::{Context, ContextBuilder, HelpRenderer};
+    /// use click::group::CommandLike;
+    /// use std::sync::Arc;
+    ///
+    /// let renderer: HelpRenderer = Arc::new(|cmd, ctx| {
+    ///     format!("custom help for {}", ctx.info_name().unwrap_or(""))
+    /// });
+    ///
+    /// let ctx = ContextBuilder::new()
+    ///     .info_name("root")
+    ///     .help_renderer(renderer)
+    ///     .build();
+    ///
+    /// assert!(ctx.help_renderer().is_some());
+    /// ```
+    pub fn help_renderer(&self) -> Option<&HelpRenderer> {
+        let mut current: Option<&Context> = Some(self);
+        while let Some(ctx) = current {
+            if ctx.help_renderer.is_some() {
+                return ctx.help_renderer.as_ref();
+            }
+            current = ctx.parent.as_ref().map(|p| p.as_ref());
+        }
+        None
     }
 
     /// Get the computed command path.
@@ -939,6 +999,7 @@ pub struct ContextBuilder {
     help_option_names: Option<Vec<String>>,
     color: Option<bool>,
     show_default: Option<bool>,
+    help_renderer: Option<HelpRenderer>,
 }
 
 impl ContextBuilder {
@@ -1050,6 +1111,37 @@ impl ContextBuilder {
         self
     }
 
+    /// Install a pluggable help renderer.
+    ///
+    /// When installed on the root context, `Group::invoke` will call this
+    /// renderer for any subcommand's `--help` request (`Exit{0}` from
+    /// `make_context`) instead of falling back to `cmd.get_help()`.
+    ///
+    /// The renderer is inherited by child contexts through the parent chain;
+    /// you only need to install it once on the root.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use click::context::{ContextBuilder, HelpRenderer};
+    /// use std::sync::Arc;
+    ///
+    /// let renderer: HelpRenderer = Arc::new(|cmd, ctx| {
+    ///     format!("CUSTOM HELP: {}", ctx.info_name().unwrap_or(""))
+    /// });
+    ///
+    /// let ctx = ContextBuilder::new()
+    ///     .info_name("myapp")
+    ///     .help_renderer(renderer)
+    ///     .build();
+    ///
+    /// assert!(ctx.help_renderer().is_some());
+    /// ```
+    pub fn help_renderer(mut self, renderer: HelpRenderer) -> Self {
+        self.help_renderer = Some(renderer);
+        self
+    }
+
     /// Build the context.
     pub fn build(self) -> Context {
         // Inherit values from parent if not explicitly set
@@ -1098,7 +1190,10 @@ impl ContextBuilder {
         };
 
         // Inherit default_map from parent, with child overrides.
-        let parent_default_map = self.parent.as_ref().and_then(|parent| parent.default_map.clone());
+        let parent_default_map = self
+            .parent
+            .as_ref()
+            .and_then(|parent| parent.default_map.clone());
         let default_map = match (parent_default_map, self.default_map) {
             (Some(mut inherited), Some(child)) => {
                 for (key, value) in child {
@@ -1132,6 +1227,7 @@ impl ContextBuilder {
             show_default,
             parameter_source: HashMap::new(),
             close_callbacks: RefCell::new(Vec::new()),
+            help_renderer: self.help_renderer,
         }
     }
 }
@@ -1507,8 +1603,8 @@ mod tests {
 
     #[test]
     fn test_context_invoke_with_args() {
-        use crate::command::Command;
         use crate::argument::Argument;
+        use crate::command::Command;
         use std::sync::Mutex;
 
         let captured_name = Arc::new(Mutex::new(String::new()));
@@ -1576,7 +1672,8 @@ mod tests {
             .build();
 
         let mut ctx = ContextBuilder::new().info_name("sender").build();
-        ctx.params_mut().insert("name".to_string(), Arc::new("Forwarded".to_string()));
+        ctx.params_mut()
+            .insert("name".to_string(), Arc::new("Forwarded".to_string()));
         let ctx = Arc::new(ctx);
 
         let result = ctx.forward(&other_cmd);
@@ -1604,8 +1701,10 @@ mod tests {
             .build();
 
         let mut ctx = ContextBuilder::new().info_name("sender").build();
-        ctx.params_mut().insert("name".to_string(), Arc::new("Test".to_string()));
-        ctx.params_mut().insert("count".to_string(), Arc::new(42i32));
+        ctx.params_mut()
+            .insert("name".to_string(), Arc::new("Test".to_string()));
+        ctx.params_mut()
+            .insert("count".to_string(), Arc::new(42i32));
         let ctx = Arc::new(ctx);
 
         let result = ctx.forward(&other_cmd);
@@ -1633,7 +1732,8 @@ mod tests {
             .build();
 
         let mut ctx = ContextBuilder::new().info_name("sender").build();
-        ctx.params_mut().insert("name".to_string(), Arc::new("Test".to_string()));
+        ctx.params_mut()
+            .insert("name".to_string(), Arc::new("Test".to_string()));
         ctx.set_parameter_source("name", ParameterSource::CommandLine);
         let ctx = Arc::new(ctx);
 
@@ -1761,9 +1861,7 @@ mod tests {
         use crate::error::ClickError;
 
         let other_cmd = Command::new("failing")
-            .callback(|_ctx| {
-                Err(ClickError::usage("intentional failure"))
-            })
+            .callback(|_ctx| Err(ClickError::usage("intentional failure")))
             .build();
 
         let ctx = Arc::new(ContextBuilder::new().info_name("main").build());
@@ -1780,9 +1878,7 @@ mod tests {
         use crate::error::ClickError;
 
         let other_cmd = Command::new("failing")
-            .callback(|_ctx| {
-                Err(ClickError::usage("intentional failure"))
-            })
+            .callback(|_ctx| Err(ClickError::usage("intentional failure")))
             .build();
 
         let ctx = Arc::new(ContextBuilder::new().info_name("main").build());
@@ -1843,5 +1939,69 @@ mod tests {
         assert!(result.is_ok());
         // Child context should have been closed after forward
         assert!(child_closed.load(Ordering::SeqCst));
+    }
+
+    // =========================================================================
+    // Tests for HelpRenderer / pluggable renderer
+    // =========================================================================
+
+    #[test]
+    fn test_help_renderer_set_and_get() {
+        let renderer: HelpRenderer =
+            Arc::new(|_cmd, ctx| format!("CUSTOM:{}", ctx.info_name().unwrap_or("")));
+        let ctx = ContextBuilder::new()
+            .info_name("myapp")
+            .help_renderer(renderer)
+            .build();
+
+        assert!(ctx.help_renderer().is_some());
+        let out = ctx.help_renderer().unwrap()(&crate::command::Command::new("fake").build(), &ctx);
+        assert_eq!(out, "CUSTOM:myapp");
+    }
+
+    #[test]
+    fn test_help_renderer_not_set_returns_none() {
+        let ctx = ContextBuilder::new().info_name("myapp").build();
+        assert!(ctx.help_renderer().is_none());
+    }
+
+    #[test]
+    fn test_help_renderer_inherited_through_parent() {
+        let renderer: HelpRenderer =
+            Arc::new(|_cmd, ctx| format!("INHERITED:{}", ctx.info_name().unwrap_or("")));
+        let parent = Arc::new(
+            ContextBuilder::new()
+                .info_name("root")
+                .help_renderer(renderer)
+                .build(),
+        );
+        let child = ContextBuilder::new()
+            .info_name("child")
+            .parent(Arc::clone(&parent))
+            .build();
+        // Child has no renderer of its own, but inherits from parent.
+        assert!(child.help_renderer.is_none()); // not on child directly
+        assert!(child.help_renderer().is_some()); // but found via walk
+    }
+
+    #[test]
+    fn test_help_renderer_child_overrides_parent() {
+        let parent_renderer: HelpRenderer = Arc::new(|_cmd, _ctx| "PARENT".to_string());
+        let child_renderer: HelpRenderer = Arc::new(|_cmd, _ctx| "CHILD".to_string());
+        let parent = Arc::new(
+            ContextBuilder::new()
+                .info_name("root")
+                .help_renderer(parent_renderer)
+                .build(),
+        );
+        let child = ContextBuilder::new()
+            .info_name("sub")
+            .parent(Arc::clone(&parent))
+            .help_renderer(child_renderer)
+            .build();
+        let fake_cmd = crate::command::Command::new("fake").build();
+        let fake_ctx = ContextBuilder::new().build();
+        let out = child.help_renderer().unwrap()(&fake_cmd, &fake_ctx);
+        assert_eq!(out, "CHILD");
     }
 }

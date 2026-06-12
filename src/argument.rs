@@ -69,7 +69,8 @@ where
     }
 
     fn convert_any(&self, value: &str) -> Result<Box<dyn Any + Send + Sync>, String> {
-        self.convert(value).map(|v| Box::new(v) as Box<dyn Any + Send + Sync>)
+        self.convert(value)
+            .map(|v| Box::new(v) as Box<dyn Any + Send + Sync>)
     }
 
     fn convert_multi(&self, values: &[String]) -> Result<Box<dyn Any + Send + Sync>, String> {
@@ -148,7 +149,10 @@ impl fmt::Debug for Argument {
             .field("config", &self.config)
             .field("default_value", &self.default_value)
             .field("type_name", &self.type_converter.name())
-            .field("has_shell_complete", &self.shell_complete_callback.is_some())
+            .field(
+                "has_shell_complete",
+                &self.shell_complete_callback.is_some(),
+            )
             .finish()
     }
 }
@@ -192,10 +196,9 @@ impl Argument {
     /// For non-String types, use `convert_any` instead.
     pub fn convert(&self, value: &str) -> Result<String, String> {
         let any_val = self.type_converter.convert_any(value)?;
-        any_val
-            .downcast::<String>()
-            .map(|v| *v)
-            .map_err(|_| "Type conversion returned non-String value; use convert_any() instead".to_string())
+        any_val.downcast::<String>().map(|v| *v).map_err(|_| {
+            "Type conversion returned non-String value; use convert_any() instead".to_string()
+        })
     }
 
     /// Get shell completions for this argument.
@@ -433,8 +436,11 @@ impl ArgumentBuilder {
     /// Set a callback invoked after conversion.
     pub fn callback<F>(mut self, callback: F) -> Self
     where
-        F: Fn(&Context, &dyn Parameter, Arc<dyn Any + Send + Sync>)
-                -> Result<Arc<dyn Any + Send + Sync>, ClickError>
+        F: Fn(
+                &Context,
+                &dyn Parameter,
+                Arc<dyn Any + Send + Sync>,
+            ) -> Result<Arc<dyn Any + Send + Sync>, ClickError>
             + Send
             + Sync
             + 'static,
@@ -955,9 +961,7 @@ mod tests {
         // Custom callback should override type's completions
         let arg = Argument::new("format")
             .type_(Choice::new(["json", "xml", "yaml"]))
-            .shell_complete(|_ctx, _incomplete| {
-                vec![CompletionItem::new("custom")]
-            })
+            .shell_complete(|_ctx, _incomplete| vec![CompletionItem::new("custom")])
             .build();
 
         let ctx = ContextBuilder::new().build();

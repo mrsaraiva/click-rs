@@ -12,8 +12,8 @@
 //! - pass_decorator pattern for sharing state
 
 use click::{
-    echo, make_pass_decorator, Argument, ClickOption, Command, CommandLike, Context,
-    ContextBuilder, Group, ClickError, Result,
+    echo, make_pass_decorator, Argument, ClickError, ClickOption, Command, CommandLike, Context,
+    ContextBuilder, Group, Result,
 };
 use std::collections::HashMap;
 use std::env;
@@ -127,9 +127,9 @@ impl AliasedGroup {
         }
 
         // Step 2: Look up an explicit alias in the config
-        let alias_result = self.config.with_config(|cfg| {
-            cfg.aliases.get(cmd_name).cloned()
-        });
+        let alias_result = self
+            .config
+            .with_config(|cfg| cfg.aliases.get(cmd_name).cloned());
         if let Some(actual_cmd) = alias_result {
             if self.inner.get_command(&actual_cmd).is_some() {
                 return Some(actual_cmd);
@@ -318,29 +318,24 @@ fn main() {
     // Alias command to add new aliases
     let alias_cmd = Command::new("alias")
         .help("Adds an alias to the specified configuration file.")
-        .argument(
-            Argument::new("alias_")
-                .help("The alias name")
-                .build(),
-        )
-        .argument(
-            Argument::new("cmd")
-                .help("The command to alias")
-                .build(),
-        )
+        .argument(Argument::new("alias_").help("The alias name").build())
+        .argument(Argument::new("cmd").help("The command to alias").build())
         .option(
             ClickOption::new(&["--config-file"])
                 .help("Config file to write to")
                 .default("aliases.ini")
                 .build(),
         )
-        .callback(make_pass_decorator::<SharedConfig>().decorate(
-            move |cfg: &SharedConfig, ctx| {
-                let alias_ = ctx.get_param::<String>("alias_")
+        .callback(
+            make_pass_decorator::<SharedConfig>().decorate(move |cfg: &SharedConfig, ctx| {
+                let alias_ = ctx
+                    .get_param::<String>("alias_")
                     .ok_or_else(|| ClickError::missing_argument("ALIAS"))?;
-                let cmd = ctx.get_param::<String>("cmd")
+                let cmd = ctx
+                    .get_param::<String>("cmd")
                     .ok_or_else(|| ClickError::missing_argument("CMD"))?;
-                let config_file = ctx.get_param::<String>("config_file")
+                let config_file = ctx
+                    .get_param::<String>("config_file")
                     .map(|s| s.as_str())
                     .unwrap_or("aliases.ini");
 
@@ -351,10 +346,15 @@ fn main() {
                     }
                 });
 
-                echo(&format!("Added '{}' as alias for '{}'", alias_, cmd), true, false, None);
+                echo(
+                    &format!("Added '{}' as alias for '{}'", alias_, cmd),
+                    true,
+                    false,
+                    None,
+                );
                 Ok(())
-            },
-        ))
+            }),
+        )
         .build();
 
     // Build the inner group with --config option

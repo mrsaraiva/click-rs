@@ -88,11 +88,7 @@ pub fn expand_command(input: DeriveInput) -> Result<TokenStream> {
         .unwrap_or_else(|| to_kebab_case(&name.to_string()));
 
     // Generate help text
-    let help_text = cmd_attr
-        .help
-        .clone()
-        .or(doc_comment)
-        .unwrap_or_default();
+    let help_text = cmd_attr.help.clone().or(doc_comment).unwrap_or_default();
 
     // Generate option builders
     let option_builders = generate_option_builders(&field_infos)?;
@@ -101,7 +97,8 @@ pub fn expand_command(input: DeriveInput) -> Result<TokenStream> {
     let argument_builders = generate_argument_builders(&field_infos)?;
 
     // Generate convenience option builders
-    let convenience_option_builders = generate_convenience_option_builders(&convenience_opts, &cmd_name);
+    let convenience_option_builders =
+        generate_convenience_option_builders(&convenience_opts, &cmd_name);
 
     // Generate field extraction from context
     let field_extractions = generate_field_extractions(&field_infos)?;
@@ -263,7 +260,10 @@ fn generate_convenience_option_builders(
             .help
             .clone()
             .unwrap_or_else(|| "Show the version and exit.".to_string());
-        let prog_name = ver_attr.prog_name.clone().unwrap_or_else(|| cmd_name.to_string());
+        let prog_name = ver_attr
+            .prog_name
+            .clone()
+            .unwrap_or_else(|| cmd_name.to_string());
         let message = ver_attr
             .message
             .clone()
@@ -320,7 +320,10 @@ fn generate_convenience_option_builders(
             .names
             .clone()
             .unwrap_or_else(|| vec!["--password".to_string()]);
-        let prompt = pass_attr.prompt.clone().unwrap_or_else(|| "Password".to_string());
+        let prompt = pass_attr
+            .prompt
+            .clone()
+            .unwrap_or_else(|| "Password".to_string());
         let help = pass_attr.help.clone().unwrap_or_default();
         let confirmation = pass_attr.confirmation_prompt;
 
@@ -470,7 +473,10 @@ fn generate_option_builders(fields: &[FieldInfo]) -> Result<Vec<TokenStream>> {
                 Some(validator) => {
                     let validator_ty = if is_option_type(field_ty) {
                         let inner = extract_inner_type(field_ty).ok_or_else(|| {
-                            Error::new_spanned(field_ty, "#[option(validate = ...)] requires Option<T> to use a concrete T")
+                            Error::new_spanned(
+                                field_ty,
+                                "#[option(validate = ...)] requires Option<T> to use a concrete T",
+                            )
                         })?;
                         quote! { #inner }
                     } else {
@@ -554,9 +560,7 @@ fn generate_argument_builders(fields: &[FieldInfo]) -> Result<Vec<TokenStream>> 
             };
 
             // Handle required - default is true for non-Option types
-            let is_required = arg_attr
-                .required
-                .unwrap_or(!is_option_type(field_ty));
+            let is_required = arg_attr.required.unwrap_or(!is_option_type(field_ty));
             let required_opt = quote! { .required(#is_required) };
 
             // Handle hidden - Argument::hidden takes a bool
@@ -688,7 +692,8 @@ fn generate_field_extractions(fields: &[FieldInfo]) -> Result<Vec<TokenStream>> 
                 extractions.push(extraction);
             }
             FieldAttr::Argument(arg_attr) => {
-                let extraction = generate_argument_extraction(field_name, &field_name_str, field_ty, arg_attr)?;
+                let extraction =
+                    generate_argument_extraction(field_name, &field_name_str, field_ty, arg_attr)?;
                 extractions.push(extraction);
             }
             FieldAttr::Subcommand(_) => {
@@ -720,7 +725,10 @@ fn generate_field_extractions(fields: &[FieldInfo]) -> Result<Vec<TokenStream>> 
                 );
                 if is_option_type(field_ty) {
                     let inner_ty = extract_inner_type(field_ty).ok_or_else(|| {
-                        Error::new_spanned(field_ty, "#[pass_obj] requires a concrete Option<T> type")
+                        Error::new_spanned(
+                            field_ty,
+                            "#[pass_obj] requires a concrete Option<T> type",
+                        )
                     })?;
                     extractions.push(quote! {
                         let #field_name = ctx.obj::<#inner_ty>().cloned();
@@ -796,7 +804,10 @@ fn generate_option_extraction(
     if is_option_type(field_ty) {
         if use_typed {
             let inner_ty = extract_inner_type(field_ty).ok_or_else(|| {
-                Error::new_spanned(field_ty, "#[option(type = ...)] with Option<T> requires concrete T")
+                Error::new_spanned(
+                    field_ty,
+                    "#[option(type = ...)] with Option<T> requires concrete T",
+                )
             })?;
             return Ok(quote! {
                 let #field_name = ctx.get_param::<#inner_ty>(#option_name).cloned();
@@ -907,7 +918,10 @@ fn generate_argument_extraction(
     if is_option_type(field_ty) {
         if use_typed {
             let inner_ty = extract_inner_type(field_ty).ok_or_else(|| {
-                Error::new_spanned(field_ty, "#[argument(type = ...)] with Option<T> requires concrete T")
+                Error::new_spanned(
+                    field_ty,
+                    "#[argument(type = ...)] with Option<T> requires concrete T",
+                )
             })?;
             return Ok(quote! {
                 let #field_name = ctx.get_param::<#inner_ty>(#field_name_str).cloned();

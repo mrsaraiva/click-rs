@@ -3,11 +3,9 @@
 //! These tests verify the public API of the termui module.
 
 use click::termui::{
-    style, strip_ansi_codes, Color, ProgressBar,
-    BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE,
-    BRIGHT_BLACK, BRIGHT_RED, BRIGHT_GREEN, BRIGHT_YELLOW,
-    BRIGHT_BLUE, BRIGHT_MAGENTA, BRIGHT_CYAN, BRIGHT_WHITE, RESET,
-    get_terminal_size,
+    get_terminal_size, strip_ansi_codes, style, Color, ProgressBar, BLACK, BLUE, BRIGHT_BLACK,
+    BRIGHT_BLUE, BRIGHT_CYAN, BRIGHT_GREEN, BRIGHT_MAGENTA, BRIGHT_RED, BRIGHT_WHITE,
+    BRIGHT_YELLOW, CYAN, GREEN, MAGENTA, RED, RESET, WHITE, YELLOW,
 };
 
 // ============================================================================
@@ -99,25 +97,63 @@ fn test_color_constants() {
 
 #[test]
 fn test_style_no_formatting() {
-    let result = style("hello", None, None, false, false, false, false, false, false, false, false);
+    let result = style(
+        "hello", None, None, false, false, false, false, false, false, false, false,
+    );
     assert_eq!(result, "hello");
 }
 
 #[test]
 fn test_style_fg_color_only() {
-    let result = style("hello", Some(Color::Red), None, false, false, false, false, false, false, false, true);
+    let result = style(
+        "hello",
+        Some(Color::Red),
+        None,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+    );
     assert_eq!(result, "\x1b[31mhello\x1b[0m");
 }
 
 #[test]
 fn test_style_bg_color_only() {
-    let result = style("hello", None, Some(Color::Blue), false, false, false, false, false, false, false, true);
+    let result = style(
+        "hello",
+        None,
+        Some(Color::Blue),
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+    );
     assert_eq!(result, "\x1b[44mhello\x1b[0m");
 }
 
 #[test]
 fn test_style_both_colors() {
-    let result = style("hello", Some(Color::White), Some(Color::Red), false, false, false, false, false, false, false, true);
+    let result = style(
+        "hello",
+        Some(Color::White),
+        Some(Color::Red),
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+    );
     assert!(result.starts_with("\x1b["));
     assert!(result.contains("37")); // white fg
     assert!(result.contains("41")); // red bg
@@ -126,49 +162,75 @@ fn test_style_both_colors() {
 
 #[test]
 fn test_style_bold() {
-    let result = style("hello", None, None, true, false, false, false, false, false, false, true);
+    let result = style(
+        "hello", None, None, true, false, false, false, false, false, false, true,
+    );
     assert_eq!(result, "\x1b[1mhello\x1b[0m");
 }
 
 #[test]
 fn test_style_dim() {
-    let result = style("hello", None, None, false, true, false, false, false, false, false, true);
+    let result = style(
+        "hello", None, None, false, true, false, false, false, false, false, true,
+    );
     assert_eq!(result, "\x1b[2mhello\x1b[0m");
 }
 
 #[test]
 fn test_style_italic() {
-    let result = style("hello", None, None, false, false, false, false, true, false, false, true);
+    let result = style(
+        "hello", None, None, false, false, false, false, true, false, false, true,
+    );
     assert_eq!(result, "\x1b[3mhello\x1b[0m");
 }
 
 #[test]
 fn test_style_underline() {
-    let result = style("hello", None, None, false, false, true, false, false, false, false, true);
+    let result = style(
+        "hello", None, None, false, false, true, false, false, false, false, true,
+    );
     assert_eq!(result, "\x1b[4mhello\x1b[0m");
 }
 
 #[test]
 fn test_style_blink() {
-    let result = style("hello", None, None, false, false, false, false, false, true, false, true);
+    let result = style(
+        "hello", None, None, false, false, false, false, false, true, false, true,
+    );
     assert_eq!(result, "\x1b[5mhello\x1b[0m");
 }
 
 #[test]
 fn test_style_overline() {
-    let result = style("hello", None, None, false, false, false, true, false, false, false, true);
+    let result = style(
+        "hello", None, None, false, false, false, true, false, false, false, true,
+    );
     assert_eq!(result, "\x1b[53mhello\x1b[0m");
 }
 
 #[test]
 fn test_style_strikethrough() {
-    let result = style("hello", None, None, false, false, false, false, false, false, true, true);
+    let result = style(
+        "hello", None, None, false, false, false, false, false, false, true, true,
+    );
     assert_eq!(result, "\x1b[9mhello\x1b[0m");
 }
 
 #[test]
 fn test_style_no_reset() {
-    let result = style("hello", Some(Color::Green), None, false, false, false, false, false, false, false, false);
+    let result = style(
+        "hello",
+        Some(Color::Green),
+        None,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+    );
     assert_eq!(result, "\x1b[32mhello");
     assert!(!result.contains("\x1b[0m"));
 }
@@ -179,14 +241,14 @@ fn test_style_multiple_attributes() {
         "hello",
         Some(Color::Red),
         Some(Color::White),
-        true,  // bold
+        true, // bold
         false,
-        true,  // underline
-        false,
-        false,
+        true, // underline
         false,
         false,
-        true,  // reset
+        false,
+        false,
+        true, // reset
     );
 
     // Should contain bold (1), underline (4), red fg (31), white bg (47)
@@ -205,23 +267,23 @@ fn test_style_all_attributes() {
         "test",
         Some(Color::Blue),
         Some(Color::Yellow),
-        true,  // bold
-        true,  // dim
-        true,  // underline
-        true,  // overline
-        true,  // italic
-        true,  // blink
-        true,  // strikethrough
-        true,  // reset
+        true, // bold
+        true, // dim
+        true, // underline
+        true, // overline
+        true, // italic
+        true, // blink
+        true, // strikethrough
+        true, // reset
     );
 
     assert!(result.starts_with("\x1b["));
-    assert!(result.contains("1"));  // bold
-    assert!(result.contains("2"));  // dim
-    assert!(result.contains("3"));  // italic
-    assert!(result.contains("4"));  // underline
-    assert!(result.contains("5"));  // blink
-    assert!(result.contains("9"));  // strikethrough
+    assert!(result.contains("1")); // bold
+    assert!(result.contains("2")); // dim
+    assert!(result.contains("3")); // italic
+    assert!(result.contains("4")); // underline
+    assert!(result.contains("5")); // blink
+    assert!(result.contains("9")); // strikethrough
     assert!(result.contains("53")); // overline
     assert!(result.contains("34")); // blue fg
     assert!(result.contains("43")); // yellow bg
@@ -361,7 +423,8 @@ fn test_progress_bar_width() {
     let output = bar.render();
 
     // Count the dashes (should be 30 for 0% progress)
-    let bar_content: String = output.chars()
+    let bar_content: String = output
+        .chars()
         .skip_while(|c| *c != '[')
         .skip(1)
         .take_while(|c| *c != ']')

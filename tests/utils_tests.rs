@@ -2,8 +2,8 @@
 
 use click::utils::{
     expand_path, format_filename, get_app_dir, get_extension, get_os_args,
-    get_os_args_skip_program, get_text_stderr, get_text_stdout, home_dir,
-    join_with_conjunction, make_safe_filename, pluralize, safecall, strip_extension,
+    get_os_args_skip_program, get_text_stderr, get_text_stdout, home_dir, join_with_conjunction,
+    make_safe_filename, pluralize, safecall, strip_extension,
 };
 use std::env;
 use std::io::Write;
@@ -215,7 +215,10 @@ fn test_home_dir_with_env() {
     // If HOME is set, we should get a result
     if env::var("HOME").is_ok() {
         let home = home_dir();
-        assert!(home.is_some(), "home_dir() should return Some when HOME is set");
+        assert!(
+            home.is_some(),
+            "home_dir() should return Some when HOME is set"
+        );
     }
 }
 
@@ -257,19 +260,28 @@ fn test_join_with_conjunction_one() {
 #[test]
 fn test_join_with_conjunction_two() {
     let items = vec!["apple", "banana"];
-    assert_eq!(join_with_conjunction(&items, ", ", " and "), "apple and banana");
+    assert_eq!(
+        join_with_conjunction(&items, ", ", " and "),
+        "apple and banana"
+    );
 }
 
 #[test]
 fn test_join_with_conjunction_three() {
     let items = vec!["apple", "banana", "cherry"];
-    assert_eq!(join_with_conjunction(&items, ", ", " and "), "apple, banana and cherry");
+    assert_eq!(
+        join_with_conjunction(&items, ", ", " and "),
+        "apple, banana and cherry"
+    );
 }
 
 #[test]
 fn test_join_with_conjunction_or() {
     let items = vec!["red", "green", "blue"];
-    assert_eq!(join_with_conjunction(&items, ", ", " or "), "red, green or blue");
+    assert_eq!(
+        join_with_conjunction(&items, ", ", " or "),
+        "red, green or blue"
+    );
 }
 
 #[test]
@@ -360,8 +372,14 @@ fn test_get_extension_path() {
 
 #[test]
 fn test_strip_extension_normal() {
-    assert_eq!(strip_extension(Path::new("file.txt")), PathBuf::from("file"));
-    assert_eq!(strip_extension(Path::new("file.tar.gz")), PathBuf::from("file.tar"));
+    assert_eq!(
+        strip_extension(Path::new("file.txt")),
+        PathBuf::from("file")
+    );
+    assert_eq!(
+        strip_extension(Path::new("file.tar.gz")),
+        PathBuf::from("file.tar")
+    );
 }
 
 #[test]

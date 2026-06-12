@@ -43,7 +43,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::argument::Argument;
-use crate::context::{push_context, pop_context, Context, ContextBuilder};
+use crate::context::{pop_context, push_context, Context, ContextBuilder};
 use crate::error::{ClickError, ErrorContext};
 use crate::option::ClickOption;
 use crate::parameter::{Nargs, Parameter};
@@ -148,7 +148,10 @@ impl std::fmt::Debug for Command {
         f.debug_struct("Command")
             .field("name", &self.name)
             .field("options", &format!("<{} options>", self.options.len()))
-            .field("arguments", &format!("<{} arguments>", self.arguments.len()))
+            .field(
+                "arguments",
+                &format!("<{} arguments>", self.arguments.len()),
+            )
             .field("help", &self.help)
             .field("epilog", &self.epilog)
             .field("short_help", &self.short_help)
@@ -451,7 +454,14 @@ impl Command {
             (OptionAction::Store, nargs_val, None, fnv)
         };
 
-        parser.add_option_ex(&opts, opt.name(), action, nargs, const_value, flag_needs_value);
+        parser.add_option_ex(
+            &opts,
+            opt.name(),
+            action,
+            nargs,
+            const_value,
+            flag_needs_value,
+        );
     }
 
     /// Add an Argument to the parser.
@@ -509,23 +519,21 @@ impl Command {
                 .with_help_options(ctx.help_option_names().to_vec())
         };
 
-        let convert_single = |value: &str| -> Result<Arc<dyn std::any::Any + Send + Sync>, ClickError> {
-            opt.convert_any(value)
-                .map(Arc::from)
-                .map_err(|msg| {
+        let convert_single =
+            |value: &str| -> Result<Arc<dyn std::any::Any + Send + Sync>, ClickError> {
+                opt.convert_any(value).map(Arc::from).map_err(|msg| {
                     ClickError::bad_parameter_named(msg, opt.human_readable_name())
                         .with_context(make_error_ctx())
                 })
-        };
+            };
 
-        let convert_multi = |values: &[String]| -> Result<Arc<dyn std::any::Any + Send + Sync>, ClickError> {
-            opt.convert_multi(values)
-                .map(Arc::from)
-                .map_err(|msg| {
+        let convert_multi =
+            |values: &[String]| -> Result<Arc<dyn std::any::Any + Send + Sync>, ClickError> {
+                opt.convert_multi(values).map(Arc::from).map_err(|msg| {
                     ClickError::bad_parameter_named(msg, opt.human_readable_name())
                         .with_context(make_error_ctx())
                 })
-        };
+            };
 
         // Convert ParsedValue to a boxed value for storage
         let envvar_value = if matches!(parsed_value, Some(ParsedValue::Unset) | None) {
@@ -619,17 +627,15 @@ impl Command {
                             default_value,
                             opt.hide_input,
                             opt.confirmation_prompt,
-                            |input| {
-                                match opt.convert_any(input) {
-                                    Ok(any_val) => {
-                                        if let Ok(val) = any_val.downcast::<String>() {
-                                            Ok(*val)
-                                        } else {
-                                            Ok(input.to_string())
-                                        }
+                            |input| match opt.convert_any(input) {
+                                Ok(any_val) => {
+                                    if let Ok(val) = any_val.downcast::<String>() {
+                                        Ok(*val)
+                                    } else {
+                                        Ok(input.to_string())
                                     }
-                                    Err(msg) => Err(msg),
                                 }
+                                Err(msg) => Err(msg),
                             },
                         )?;
 
@@ -662,7 +668,9 @@ impl Command {
                 .with_command_path(ctx.command_path())
                 .with_usage(self.get_usage(ctx))
                 .with_help_options(ctx.help_option_names().to_vec());
-            return Err(ClickError::missing_option(opt.human_readable_name()).with_context(error_ctx));
+            return Err(
+                ClickError::missing_option(opt.human_readable_name()).with_context(error_ctx)
+            );
         }
 
         if let Some(ref callback) = opt.config.callback {
@@ -707,24 +715,24 @@ impl Command {
                 .with_help_options(ctx.help_option_names().to_vec())
         };
 
-        let convert_single = |value: &str| -> Result<Arc<dyn std::any::Any + Send + Sync>, ClickError> {
-            arg.convert_any(value)
-                .map(Arc::from)
-                .map_err(|msg| {
+        let convert_single =
+            |value: &str| -> Result<Arc<dyn std::any::Any + Send + Sync>, ClickError> {
+                arg.convert_any(value).map(Arc::from).map_err(|msg| {
                     ClickError::bad_parameter_named(msg, arg.human_readable_name())
                         .with_context(make_error_ctx())
                 })
-        };
+            };
 
-        let convert_multi = |values: &[String]| -> Result<Arc<dyn std::any::Any + Send + Sync>, ClickError> {
-            arg.type_converter()
-                .convert_multi(values)
-                .map(Arc::from)
-                .map_err(|msg| {
-                    ClickError::bad_parameter_named(msg, arg.human_readable_name())
-                        .with_context(make_error_ctx())
-                })
-        };
+        let convert_multi =
+            |values: &[String]| -> Result<Arc<dyn std::any::Any + Send + Sync>, ClickError> {
+                arg.type_converter()
+                    .convert_multi(values)
+                    .map(Arc::from)
+                    .map_err(|msg| {
+                        ClickError::bad_parameter_named(msg, arg.human_readable_name())
+                            .with_context(make_error_ctx())
+                    })
+            };
 
         // Convert ParsedValue to a boxed value for storage
         let default_map_value = if matches!(parsed_value, Some(ParsedValue::Unset) | None) {
@@ -788,7 +796,9 @@ impl Command {
                 .with_command_path(ctx.command_path())
                 .with_usage(self.get_usage(ctx))
                 .with_help_options(ctx.help_option_names().to_vec());
-            return Err(ClickError::missing_argument(arg.human_readable_name()).with_context(error_ctx));
+            return Err(
+                ClickError::missing_argument(arg.human_readable_name()).with_context(error_ctx)
+            );
         }
 
         if let Some(ref callback) = arg.config.callback {
@@ -919,7 +929,10 @@ impl Command {
         if arg == opt {
             return true;
         }
-        if opt.starts_with("--") && arg.starts_with(opt) && arg.get(opt.len()..opt.len() + 1) == Some("=") {
+        if opt.starts_with("--")
+            && arg.starts_with(opt)
+            && arg.get(opt.len()..opt.len() + 1) == Some("=")
+        {
             return true;
         }
         if opt.starts_with('-') && opt.len() == 2 && !opt.starts_with("--") {
@@ -1443,14 +1456,14 @@ mod tests {
     #[test]
     fn test_parse_args_with_option() {
         let cmd = Command::new("greet")
-            .option(
-                ClickOption::new(&["--name", "-n"])
-                    .default("World")
-                    .build(),
-            )
+            .option(ClickOption::new(&["--name", "-n"]).default("World").build())
             .build();
 
-        let ctx = cmd.make_context("greet", vec!["--name".to_string(), "Alice".to_string()], None);
+        let ctx = cmd.make_context(
+            "greet",
+            vec!["--name".to_string(), "Alice".to_string()],
+            None,
+        );
         assert!(ctx.is_ok());
 
         let ctx = ctx.unwrap();
@@ -1602,11 +1615,7 @@ mod tests {
     #[test]
     fn test_parse_flag_option() {
         let cmd = Command::new("test")
-            .option(
-                ClickOption::new(&["--verbose", "-v"])
-                    .flag("true")
-                    .build(),
-            )
+            .option(ClickOption::new(&["--verbose", "-v"]).flag("true").build())
             .build();
 
         let ctx = cmd.make_context("test", vec!["--verbose".to_string()], None);
@@ -1677,11 +1686,7 @@ mod tests {
     #[test]
     fn test_option_with_default() {
         let cmd = Command::new("greet")
-            .option(
-                ClickOption::new(&["--name"])
-                    .default("World")
-                    .build(),
-            )
+            .option(ClickOption::new(&["--name"]).default("World").build())
             .build();
 
         // Without providing the option
@@ -1691,7 +1696,10 @@ mod tests {
         let ctx = ctx.unwrap();
         let name = ctx.get_param::<String>("name");
         assert_eq!(name, Some(&"World".to_string()));
-        assert_eq!(ctx.get_parameter_source("name"), Some(ParameterSource::Default));
+        assert_eq!(
+            ctx.get_parameter_source("name"),
+            Some(ParameterSource::Default)
+        );
     }
 
     #[test]
@@ -1968,11 +1976,7 @@ mod tests {
             .build();
 
         // Only providing 2 of 3 required values
-        let ctx = cmd.make_context(
-            "point",
-            vec!["1".to_string(), "2".to_string()],
-            None,
-        );
+        let ctx = cmd.make_context("point", vec!["1".to_string(), "2".to_string()], None);
 
         // Should fail with an error about missing values
         assert!(ctx.is_err());
@@ -2027,7 +2031,10 @@ mod tests {
             .build();
 
         let ctx_default = cmd.make_context("mine", vec![], None).unwrap();
-        assert_eq!(ctx_default.get_param::<String>("ty"), Some(&"moored".to_string()));
+        assert_eq!(
+            ctx_default.get_param::<String>("ty"),
+            Some(&"moored".to_string())
+        );
 
         let ctx_drifting = cmd
             .make_context("mine", vec!["--drifting".to_string()], None)
@@ -2040,7 +2047,10 @@ mod tests {
         let ctx_moored = cmd
             .make_context("mine", vec!["--moored".to_string()], None)
             .unwrap();
-        assert_eq!(ctx_moored.get_param::<String>("ty"), Some(&"moored".to_string()));
+        assert_eq!(
+            ctx_moored.get_param::<String>("ty"),
+            Some(&"moored".to_string())
+        );
     }
 
     #[test]
@@ -2095,11 +2105,7 @@ mod tests {
     fn test_help_with_missing_required_option() {
         // --help should work even when a required option is missing
         let cmd = Command::new("test")
-            .option(
-                ClickOption::new(&["--name", "-n"])
-                    .required()
-                    .build(),
-            )
+            .option(ClickOption::new(&["--name", "-n"]).required().build())
             .build();
 
         // Without --help, missing required option should fail

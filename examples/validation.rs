@@ -94,10 +94,8 @@ fn validation(
         validate = validate_count
     )]
     count: String,
-    #[option(long, help = "A mysterious parameter.", validate = validate_foo)]
-    foo: Option<String>,
-    #[option(long, help = "A URL", type = UrlType)]
-    url: Option<ParsedUrl>,
+    #[option(long, help = "A mysterious parameter.", validate = validate_foo)] foo: Option<String>,
+    #[option(long, help = "A URL", type = UrlType)] url: Option<ParsedUrl>,
 ) -> Result<()> {
     echo(&format!("count: {}", count), true, false, None);
     echo(

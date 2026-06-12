@@ -16,13 +16,13 @@
 //! - Multi-line message input
 
 use click::{
-    echo, make_pass_decorator, Argument, ClickOption, Command, CommandLike,
-    Group, ClickError, Result,
+    echo, make_pass_decorator, Argument, ClickError, ClickOption, Command, CommandLike, Group,
+    Result,
 };
-use std::env;
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::env;
 use std::io::{self, Write};
+use std::sync::Arc;
 
 /// Repository state object that gets passed between commands.
 #[derive(Debug, Clone)]
@@ -120,7 +120,8 @@ fn main() {
                 .build(),
         )
         .callback(pass_repo().decorate(|repo: &Repo, ctx| {
-            let confirmed = ctx.get_param::<String>("yes")
+            let confirmed = ctx
+                .get_param::<String>("yes")
                 .map(|s| s == "true")
                 .unwrap_or(false);
 
@@ -165,11 +166,14 @@ fn main() {
                 .build(),
         )
         .callback(pass_repo().decorate(|repo: &Repo, ctx| {
-            let username = ctx.get_param::<String>("username")
+            let username = ctx
+                .get_param::<String>("username")
                 .ok_or_else(|| ClickError::missing_option("--username"))?;
-            let email = ctx.get_param::<String>("email")
+            let email = ctx
+                .get_param::<String>("email")
                 .ok_or_else(|| ClickError::missing_option("--email"))?;
-            let password = ctx.get_param::<String>("password")
+            let password = ctx
+                .get_param::<String>("password")
                 .ok_or_else(|| ClickError::missing_option("--password"))?;
 
             // In a real app, we would modify the repo object

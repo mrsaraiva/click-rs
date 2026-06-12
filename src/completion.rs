@@ -243,7 +243,11 @@ impl ShellComplete for ZshComplete {
         // Match Python Click:
         // - help is "_" when absent
         // - escape ":" in value iff help != "_"
-        let help = item.help.as_deref().filter(|h| !h.is_empty()).unwrap_or("_");
+        let help = item
+            .help
+            .as_deref()
+            .filter(|h| !h.is_empty())
+            .unwrap_or("_");
         let value = if help != "_" {
             item.value.replace(':', "\\:")
         } else {
@@ -527,7 +531,12 @@ pub fn get_completions(
         if let Some(command) = cmd.as_any().downcast_ref::<Command>() {
             completions.extend(get_option_completions(command, &ctx, args, incomplete));
         } else if let Some(group) = cmd.as_any().downcast_ref::<Group>() {
-            completions.extend(get_option_completions(&group.command, &ctx, args, incomplete));
+            completions.extend(get_option_completions(
+                &group.command,
+                &ctx,
+                args,
+                incomplete,
+            ));
         } else if let Some(collection) = cmd.as_any().downcast_ref::<CommandCollection>() {
             completions.extend(get_option_completions(
                 &collection.base.command,
@@ -543,9 +552,19 @@ pub fn get_completions(
         if let Some(command) = cmd.as_any().downcast_ref::<Command>() {
             completions.extend(get_argument_completions(command, &ctx, args, incomplete));
         } else if let Some(group) = cmd.as_any().downcast_ref::<Group>() {
-            completions.extend(get_argument_completions(&group.command, &ctx, args, incomplete));
+            completions.extend(get_argument_completions(
+                &group.command,
+                &ctx,
+                args,
+                incomplete,
+            ));
         } else if let Some(collection) = cmd.as_any().downcast_ref::<CommandCollection>() {
-            completions.extend(get_argument_completions(&collection.base.command, &ctx, args, incomplete));
+            completions.extend(get_argument_completions(
+                &collection.base.command,
+                &ctx,
+                args,
+                incomplete,
+            ));
         }
     }
 
@@ -565,10 +584,7 @@ fn get_argument_completions(
 ) -> Vec<CompletionItem> {
     // Count how many positional arguments have been consumed
     // (arguments that don't start with '-' and aren't option values)
-    let positional_count = args
-        .iter()
-        .filter(|a| !a.starts_with('-'))
-        .count();
+    let positional_count = args.iter().filter(|a| !a.starts_with('-')).count();
 
     // Find the argument at that position
     if let Some(arg) = cmd.arguments.get(positional_count) {
@@ -604,10 +620,8 @@ fn get_option_completions(
                     .get_completions(ctx, value_prefix)
                     .into_iter()
                     .map(|item| {
-                        let mut with_prefix = CompletionItem::new(format!(
-                            "{}={}",
-                            opt_name, item.value
-                        ));
+                        let mut with_prefix =
+                            CompletionItem::new(format!("{}={}", opt_name, item.value));
                         if let Some(help) = item.help {
                             with_prefix = with_prefix.with_help(help);
                         }
@@ -743,11 +757,7 @@ impl CompletionOption {
     /// Handle completion if requested.
     ///
     /// Returns `true` if completion was handled and the program should exit.
-    pub fn handle_completion(
-        &self,
-        cmd: &dyn CommandLike,
-        prog_name: &str,
-    ) -> bool {
+    pub fn handle_completion(&self, cmd: &dyn CommandLike, prog_name: &str) -> bool {
         if !self.is_completion_requested() {
             return false;
         }
@@ -976,7 +986,7 @@ mod tests {
             .argument(
                 Argument::new("format")
                     .type_(Choice::new(["json", "xml", "yaml"]))
-                    .build()
+                    .build(),
             )
             .build();
 
@@ -999,7 +1009,7 @@ mod tests {
                             CompletionItem::new(format!("{}.md", incomplete)),
                         ]
                     })
-                    .build()
+                    .build(),
             )
             .build();
 
@@ -1020,7 +1030,7 @@ mod tests {
             .argument(
                 Argument::new("second")
                     .type_(Choice::new(["a", "b", "c"]))
-                    .build()
+                    .build(),
             )
             .build();
 
@@ -1044,7 +1054,7 @@ mod tests {
                 Argument::new("files")
                     .multiple()
                     .type_(Choice::new(["foo.txt", "bar.txt", "baz.txt"]))
-                    .build()
+                    .build(),
             )
             .build();
 

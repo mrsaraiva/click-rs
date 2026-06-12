@@ -409,7 +409,7 @@ fn unpack_args(
             if star_pos.is_some() {
                 // Can't have two variadic specs
                 return Err(ClickError::usage(
-                    "Cannot have more than one variadic argument.".to_string()
+                    "Cannot have more than one variadic argument.".to_string(),
                 ));
             }
             star_pos = Some(result.len());
@@ -610,7 +610,8 @@ impl OptionParser {
         for opt in &opts {
             if let Some((prefix, value)) = split_opt(opt) {
                 // Track the prefix
-                self.opt_prefixes.insert(prefix.chars().next().unwrap().to_string());
+                self.opt_prefixes
+                    .insert(prefix.chars().next().unwrap().to_string());
                 if prefix.len() == 2 {
                     self.opt_prefixes.insert(prefix.to_string());
                 }
@@ -716,11 +717,7 @@ impl OptionParser {
     /// Process arguments for positional arguments.
     fn process_args_for_args(&self, state: &mut ParsingState) -> Result<(), ClickError> {
         // Combine left args and remaining right args
-        let all_args: Vec<String> = state
-            .largs
-            .drain(..)
-            .chain(state.rargs.drain(..))
-            .collect();
+        let all_args: Vec<String> = state.largs.drain(..).chain(state.rargs.drain(..)).collect();
 
         // Get nargs specs for all arguments
         let nargs_spec: Vec<i32> = self.args.iter().map(|a| a.nargs).collect();
@@ -737,12 +734,10 @@ impl OptionParser {
                 if arg_def.nargs > 1 {
                     if let ParsedValue::Multiple(ref values) = value {
                         if values.len() < arg_def.nargs as usize {
-                            return Err(ClickError::bad_argument_usage(
-                                format!(
-                                    "Argument '{}' takes {} values.",
-                                    arg_def.dest, arg_def.nargs
-                                ),
-                            ));
+                            return Err(ClickError::bad_argument_usage(format!(
+                                "Argument '{}' takes {} values.",
+                                arg_def.dest, arg_def.nargs
+                            )));
                         }
                     }
                 }
@@ -883,8 +878,7 @@ impl OptionParser {
 
         // Re-combine unknown options
         if self.ignore_unknown_options && !unknown_options.is_empty() {
-            let combined: String =
-                std::iter::once(prefix).chain(unknown_options).collect();
+            let combined: String = std::iter::once(prefix).chain(unknown_options).collect();
             state.largs.push(combined);
         }
 
@@ -906,8 +900,8 @@ impl OptionParser {
             if let Some(next_arg) = state.rargs.front() {
                 // If the next arg looks like an option, don't consume it
                 let first_char = next_arg.chars().next().unwrap_or(' ');
-                let looks_like_option = self.opt_prefixes.contains(&first_char.to_string())
-                    && next_arg.len() > 1;
+                let looks_like_option =
+                    self.opt_prefixes.contains(&first_char.to_string()) && next_arg.len() > 1;
 
                 if looks_like_option && option.flag_needs_value {
                     // Option was used as a flag without a value
@@ -954,8 +948,8 @@ impl OptionParser {
             if option.flag_needs_value {
                 if let Some(next_arg) = state.rargs.front() {
                     let first_char = next_arg.chars().next().unwrap_or(' ');
-                    let looks_like_option = self.opt_prefixes.contains(&first_char.to_string())
-                        && next_arg.len() > 1;
+                    let looks_like_option =
+                        self.opt_prefixes.contains(&first_char.to_string()) && next_arg.len() > 1;
 
                     if looks_like_option {
                         return Ok(ParsedValue::FlagNeedsValue);
@@ -966,9 +960,7 @@ impl OptionParser {
             let value = state.rargs.pop_front().unwrap();
             Ok(ParsedValue::Single(value))
         } else {
-            let values: Vec<String> = (0..nargs)
-                .filter_map(|_| state.rargs.pop_front())
-                .collect();
+            let values: Vec<String> = (0..nargs).filter_map(|_| state.rargs.pop_front()).collect();
             Ok(ParsedValue::Multiple(values))
         }
     }
@@ -1261,7 +1253,10 @@ mod tests {
 
         assert_eq!(
             opts.get("point"),
-            Some(&ParsedValue::Multiple(vec!["1".to_string(), "2".to_string()]))
+            Some(&ParsedValue::Multiple(vec![
+                "1".to_string(),
+                "2".to_string()
+            ]))
         );
         assert!(remaining.is_empty());
     }
@@ -1381,7 +1376,13 @@ mod tests {
     #[test]
     fn test_unknown_option_with_suggestion() {
         let mut parser = OptionParser::new();
-        parser.add_option(&["--help"], "help", OptionAction::StoreConst, 0, Some("true"));
+        parser.add_option(
+            &["--help"],
+            "help",
+            OptionAction::StoreConst,
+            0,
+            Some("true"),
+        );
 
         let args = vec!["--hlep".to_string()];
         let result = parser.parse_args(args);
@@ -1431,13 +1432,15 @@ mod tests {
     #[test]
     fn test_count_action() {
         let mut parser = OptionParser::new();
-        parser.add_option(&["-v", "--verbose"], "verbose", OptionAction::Count, 0, None);
+        parser.add_option(
+            &["-v", "--verbose"],
+            "verbose",
+            OptionAction::Count,
+            0,
+            None,
+        );
 
-        let args = vec![
-            "-v".to_string(),
-            "-v".to_string(),
-            "--verbose".to_string(),
-        ];
+        let args = vec!["-v".to_string(), "-v".to_string(), "--verbose".to_string()];
         let (opts, _, _) = parser.parse_args(args).unwrap();
 
         assert_eq!(opts.get("verbose"), Some(&ParsedValue::Count(3)));
@@ -1542,7 +1545,11 @@ mod tests {
         let mut parser = OptionParser::new();
         parser.add_argument("files", -1);
 
-        let args = vec!["a.txt".to_string(), "b.txt".to_string(), "c.txt".to_string()];
+        let args = vec![
+            "a.txt".to_string(),
+            "b.txt".to_string(),
+            "c.txt".to_string(),
+        ];
         let (opts, remaining, _) = parser.parse_args(args).unwrap();
 
         assert_eq!(
@@ -1582,7 +1589,11 @@ mod tests {
         parser.add_argument("dest", 1);
         parser.add_argument("sources", -1);
 
-        let args = vec!["out.txt".to_string(), "a.txt".to_string(), "b.txt".to_string()];
+        let args = vec![
+            "out.txt".to_string(),
+            "a.txt".to_string(),
+            "b.txt".to_string(),
+        ];
         let (opts, remaining, _) = parser.parse_args(args).unwrap();
 
         assert_eq!(
@@ -1619,7 +1630,13 @@ mod tests {
     fn test_options_and_arguments() {
         let mut parser = OptionParser::new();
         parser.add_option(&["-n", "--name"], "name", OptionAction::Store, 1, None);
-        parser.add_option(&["-v", "--verbose"], "verbose", OptionAction::Count, 0, None);
+        parser.add_option(
+            &["-v", "--verbose"],
+            "verbose",
+            OptionAction::Count,
+            0,
+            None,
+        );
         parser.add_argument("file", 1);
 
         let args = vec![
@@ -1698,8 +1715,7 @@ mod tests {
 
     #[test]
     fn test_token_normalize_func() {
-        let mut parser =
-            OptionParser::new().token_normalize_func(|s| s.to_lowercase());
+        let mut parser = OptionParser::new().token_normalize_func(|s| s.to_lowercase());
         parser.add_option(&["--name"], "name", OptionAction::Store, 1, None);
 
         let args = vec!["--NAME".to_string(), "value".to_string()];
@@ -1766,11 +1782,7 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(
             result[0],
-            ParsedValue::Multiple(vec![
-                "a".to_string(),
-                "b".to_string(),
-                "c".to_string()
-            ])
+            ParsedValue::Multiple(vec!["a".to_string(), "b".to_string(), "c".to_string()])
         );
         assert!(remaining.is_empty());
     }
@@ -1790,11 +1802,7 @@ mod tests {
         assert_eq!(result[0], ParsedValue::Single("dest".to_string()));
         assert_eq!(
             result[1],
-            ParsedValue::Multiple(vec![
-                "a".to_string(),
-                "b".to_string(),
-                "c".to_string()
-            ])
+            ParsedValue::Multiple(vec!["a".to_string(), "b".to_string(), "c".to_string()])
         );
         assert!(remaining.is_empty());
     }
@@ -1951,7 +1959,13 @@ mod tests {
             None,
             true, // flag_needs_value
         );
-        parser.add_option(&["--other"], "other", OptionAction::StoreConst, 0, Some("true"));
+        parser.add_option(
+            &["--other"],
+            "other",
+            OptionAction::StoreConst,
+            0,
+            Some("true"),
+        );
 
         // --opt followed by another option should not consume the next option
         let args = vec!["--opt".to_string(), "--other".to_string()];

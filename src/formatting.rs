@@ -63,7 +63,11 @@ impl HelpFormatter {
     ///
     /// If width is 0 or less than minimum, uses default width.
     pub fn new(width: usize) -> Self {
-        let width = if width < MIN_WIDTH { DEFAULT_WIDTH } else { width };
+        let width = if width < MIN_WIDTH {
+            DEFAULT_WIDTH
+        } else {
+            width
+        };
         Self {
             width,
             indent: 0,
@@ -376,10 +380,7 @@ pub fn truncate_text(text: &str, max_width: usize) -> String {
 
 /// Split text into lines that fit within the specified width.
 pub fn split_into_lines(text: &str, width: usize) -> Vec<String> {
-    wrap_text(text, width)
-        .lines()
-        .map(String::from)
-        .collect()
+    wrap_text(text, width).lines().map(String::from).collect()
 }
 
 #[cfg(test)]
@@ -417,10 +418,7 @@ mod tests {
     #[test]
     fn test_help_formatter_definition_list() {
         let mut fmt = HelpFormatter::new(80);
-        fmt.write_definition_list(&[
-            ("--help, -h", "Show help"),
-            ("--version", "Show version"),
-        ]);
+        fmt.write_definition_list(&[("--help, -h", "Show help"), ("--version", "Show version")]);
         let help = fmt.get_help();
         assert!(help.contains("--help, -h"));
         assert!(help.contains("Show help"));

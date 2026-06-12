@@ -8,11 +8,11 @@
 use std::thread;
 use std::time::Duration;
 
-use click::{
-    clear, echo, edit_text, getchar, pause, style, Argument, Color, Command, ClickOption,
-    Group, ProgressBar, CommandLike,
-};
 use click::launch;
+use click::{
+    clear, echo, edit_text, getchar, pause, style, Argument, ClickOption, Color, Command,
+    CommandLike, Group, ProgressBar,
+};
 
 fn main() {
     let cli = Group::new("termui")
@@ -61,7 +61,13 @@ fn colordemo_cmd() -> Command {
                     &format!("I am colored {}", color),
                     Some(fg_color),
                     None,
-                    false, false, false, false, false, false, false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
                     true,
                 );
                 echo(&styled_fg, true, false, None);
@@ -71,7 +77,13 @@ fn colordemo_cmd() -> Command {
                     &format!("I am background colored {}", color),
                     None,
                     Some(fg_color),
-                    false, false, false, false, false, false, false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
                     true,
                 );
                 echo(&styled_bg, true, false, None);
@@ -92,7 +104,13 @@ fn pager_cmd() -> Command {
                     &x.to_string(),
                     Some(Color::Green),
                     None,
-                    false, false, false, false, false, false, false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
                     true,
                 );
                 lines.push(format!("{}. Hello World!", num_styled));
@@ -114,7 +132,10 @@ fn progress_cmd() -> Command {
                 .build(),
         )
         .callback(|ctx| {
-            let count_str = ctx.get_param::<String>("count").map(|s| s.as_str()).unwrap_or("8000");
+            let count_str = ctx
+                .get_param::<String>("count")
+                .map(|s| s.as_str())
+                .unwrap_or("8000");
             let count: usize = count_str.parse().unwrap_or(8000);
             let count = count.clamp(1, 100000);
 
@@ -136,10 +157,16 @@ fn progress_cmd() -> Command {
 
             // Progress bar 1: Processing accounts with custom characters
             {
-                echo(&format!("Processing {} accounts...", count), true, false, None);
-                let mut bar = ProgressBar::new(count, Some("Processing accounts"), true, true, true, 30)
-                    .fill_char('█')
-                    .empty_char('░');
+                echo(
+                    &format!("Processing {} accounts...", count),
+                    true,
+                    false,
+                    None,
+                );
+                let mut bar =
+                    ProgressBar::new(count, Some("Processing accounts"), true, true, true, 30)
+                        .fill_char('█')
+                        .empty_char('░');
                 for _ in 0..count {
                     process_slowly();
                     bar.update(1);
@@ -150,8 +177,20 @@ fn progress_cmd() -> Command {
             // Progress bar 2: Committing transaction (with item display)
             {
                 let filtered_count = (count as f64 * 0.7) as usize; // ~70% pass filter
-                echo(&format!("\nCommitting ~{} transactions...", filtered_count), true, false, None);
-                let mut bar = ProgressBar::new(filtered_count, Some("Committing transaction"), true, true, true, 30);
+                echo(
+                    &format!("\nCommitting ~{} transactions...", filtered_count),
+                    true,
+                    false,
+                    None,
+                );
+                let mut bar = ProgressBar::new(
+                    filtered_count,
+                    Some("Committing transaction"),
+                    true,
+                    true,
+                    true,
+                    30,
+                );
                 let mut processed = 0;
                 for _i in 0..count {
                     if rand_simple() > 0.3 {
@@ -168,7 +207,12 @@ fn progress_cmd() -> Command {
 
             // Progress bar 3: Counting with custom characters
             {
-                echo(&format!("\nCounting {} items with custom characters...", count), true, false, None);
+                echo(
+                    &format!("\nCounting {} items with custom characters...", count),
+                    true,
+                    false,
+                    None,
+                );
                 let mut bar = ProgressBar::new(count, Some("Counting"), true, true, true, 30)
                     .fill_char('=')
                     .empty_char(' ');
@@ -181,7 +225,12 @@ fn progress_cmd() -> Command {
 
             // Progress bar 4: Minimal (no percent, no ETA)
             {
-                echo(&format!("\nMinimal progress bar ({} items)...", count), true, false, None);
+                echo(
+                    &format!("\nMinimal progress bar ({} items)...", count),
+                    true,
+                    false,
+                    None,
+                );
                 let mut bar = ProgressBar::new(count, None, false, false, false, 30);
                 for _ in 0..count {
                     process_slowly();
@@ -192,12 +241,26 @@ fn progress_cmd() -> Command {
 
             // Progress bar 5: Non-linear progress
             {
-                let steps: Vec<f64> = (0..20).map(|x| (x as f64 * 1.0 / 20.0).exp() - 1.0).collect();
+                let steps: Vec<f64> = (0..20)
+                    .map(|x| (x as f64 * 1.0 / 20.0).exp() - 1.0)
+                    .collect();
                 let total: f64 = steps.iter().sum();
                 let total_count = total as usize;
 
-                echo(&format!("\nSlowing progress bar ({} steps)...", total_count), true, false, None);
-                let mut bar = ProgressBar::new(total_count, Some("Slowing progress bar"), true, false, true, 30);
+                echo(
+                    &format!("\nSlowing progress bar ({} steps)...", total_count),
+                    true,
+                    false,
+                    None,
+                );
+                let mut bar = ProgressBar::new(
+                    total_count,
+                    Some("Slowing progress bar"),
+                    true,
+                    false,
+                    true,
+                    30,
+                );
 
                 for step in steps {
                     let sleep_ms = (step * 1000.0) as u64;
@@ -216,11 +279,15 @@ fn progress_cmd() -> Command {
 fn open_cmd() -> Command {
     Command::new("open")
         .help("Opens a file or URL in the default application.")
-        .argument(Argument::new("url").help("URL or file path to open").build())
+        .argument(
+            Argument::new("url")
+                .help("URL or file path to open")
+                .build(),
+        )
         .callback(|ctx| {
-            let url = ctx.get_param::<String>("url").ok_or_else(|| {
-                click::ClickError::usage("URL argument is required")
-            })?;
+            let url = ctx
+                .get_param::<String>("url")
+                .ok_or_else(|| click::ClickError::usage("URL argument is required"))?;
             launch(url, false, false)?;
             Ok(())
         })
@@ -233,9 +300,9 @@ fn locate_cmd() -> Command {
         .help("Opens the file location in a file manager.")
         .argument(Argument::new("url").help("File path to locate").build())
         .callback(|ctx| {
-            let url = ctx.get_param::<String>("url").ok_or_else(|| {
-                click::ClickError::usage("URL argument is required")
-            })?;
+            let url = ctx
+                .get_param::<String>("url")
+                .ok_or_else(|| click::ClickError::usage("URL argument is required"))?;
             launch(url, false, true)?;
             Ok(())
         })

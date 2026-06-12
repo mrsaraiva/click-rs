@@ -53,7 +53,10 @@ fn parse_i32_expr(expr: Expr) -> Result<i32> {
                     return i.base10_parse::<i32>().map(|v| -v);
                 }
             }
-            Err(syn::Error::new_spanned(unary, "nargs must be an integer literal"))
+            Err(syn::Error::new_spanned(
+                unary,
+                "nargs must be an integer literal",
+            ))
         }
         other => Err(syn::Error::new_spanned(
             other,
@@ -123,10 +126,8 @@ impl VersionOptionAttr {
                             result.names = Some(parse_names_expr(expr)?);
                         }
                         _ => {
-                            return Err(meta.error(format!(
-                                "unknown version_option attribute: {:?}",
-                                ident
-                            )));
+                            return Err(meta
+                                .error(format!("unknown version_option attribute: {:?}", ident)));
                         }
                     }
 
@@ -180,10 +181,9 @@ impl HelpOptionAttr {
                             result.names = Some(parse_names_expr(expr)?);
                         }
                         _ => {
-                            return Err(meta.error(format!(
-                                "unknown help_option attribute: {:?}",
-                                ident
-                            )));
+                            return Err(
+                                meta.error(format!("unknown help_option attribute: {:?}", ident))
+                            );
                         }
                     }
 
@@ -308,10 +308,8 @@ impl PasswordOptionAttr {
                             result.names = Some(parse_names_expr(expr)?);
                         }
                         _ => {
-                            return Err(meta.error(format!(
-                                "unknown password_option attribute: {:?}",
-                                ident
-                            )));
+                            return Err(meta
+                                .error(format!("unknown password_option attribute: {:?}", ident)));
                         }
                     }
 
@@ -345,7 +343,7 @@ pub struct CommandAttr {
 impl CommandAttr {
     pub fn from_attrs(attrs: &[Attribute]) -> Result<Self> {
         let mut result = CommandAttr {
-            add_help_option: true, // default true
+            add_help_option: true,         // default true
             allow_interspersed_args: true, // default true
             ..Default::default()
         };
@@ -847,7 +845,9 @@ impl FieldAttr {
                 return Ok(Some(FieldAttr::Argument(ArgumentAttr::from_attr(attr)?)));
             }
             if attr.path().is_ident("subcommand") {
-                return Ok(Some(FieldAttr::Subcommand(SubcommandAttr::from_attr(attr)?)));
+                return Ok(Some(FieldAttr::Subcommand(SubcommandAttr::from_attr(
+                    attr,
+                )?)));
             }
             if attr.path().is_ident("pass_context") {
                 return Ok(Some(FieldAttr::PassContext));
@@ -867,7 +867,10 @@ pub fn extract_doc_comment(attrs: &[Attribute]) -> Option<String> {
         .filter_map(|attr| {
             if attr.path().is_ident("doc") {
                 if let Meta::NameValue(MetaNameValue {
-                    value: Expr::Lit(ExprLit { lit: Lit::Str(s), .. }),
+                    value:
+                        Expr::Lit(ExprLit {
+                            lit: Lit::Str(s), ..
+                        }),
                     ..
                 }) = &attr.meta
                 {
@@ -882,11 +885,7 @@ pub fn extract_doc_comment(attrs: &[Attribute]) -> Option<String> {
         None
     } else {
         // Join doc lines and trim
-        let joined = docs
-            .iter()
-            .map(|s| s.trim())
-            .collect::<Vec<_>>()
-            .join("\n");
+        let joined = docs.iter().map(|s| s.trim()).collect::<Vec<_>>().join("\n");
         Some(joined.trim().to_string())
     }
 }
@@ -995,8 +994,9 @@ pub fn type_to_converter(ty: &Type) -> TokenStream {
             let ident = segment.ident.to_string();
             match ident.as_str() {
                 "String" | "str" => return quote! { click::STRING },
-                "i8" | "i16" | "i32" | "i64" | "isize" |
-                "u8" | "u16" | "u32" | "u64" | "usize" => return quote! { click::INT },
+                "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32" | "u64" | "usize" => {
+                    return quote! { click::INT }
+                }
                 "f32" | "f64" => return quote! { click::FLOAT },
                 "bool" => return quote! { click::BOOL },
                 "PathBuf" | "Path" => return quote! { click::PathType::new() },

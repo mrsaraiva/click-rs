@@ -15,17 +15,18 @@
 use std::env;
 
 use click::{
-    Argument, ClickError, ClickOption, Command, Context, Group, Result,
-    group::CommandLike,
+    group::CommandLike, Argument, ClickError, ClickOption, Command, Context, Group, Result,
 };
 
 /// Build the main Naval Fate CLI.
 fn build_cli() -> Group {
     Group::new("naval")
-        .help("Naval Fate.\n\n\
+        .help(
+            "Naval Fate.\n\n\
                This is the docopt example adopted to Click but with some actual \
                commands implemented and not just the empty parsing which really \
-               is not all that interesting.")
+               is not all that interesting.",
+        )
         .option(
             ClickOption::new(&["--version", "-V"])
                 .flag("true")
@@ -75,21 +76,9 @@ fn ship_new_callback(ctx: &Context) -> Result<()> {
 fn build_ship_move_command() -> Command {
     Command::new("move")
         .help("Moves SHIP to the new location X,Y.")
-        .argument(
-            Argument::new("ship")
-                .help("Ship to move")
-                .build(),
-        )
-        .argument(
-            Argument::new("x")
-                .help("X coordinate")
-                .build(),
-        )
-        .argument(
-            Argument::new("y")
-                .help("Y coordinate")
-                .build(),
-        )
+        .argument(Argument::new("ship").help("Ship to move").build())
+        .argument(Argument::new("x").help("X coordinate").build())
+        .argument(Argument::new("y").help("Y coordinate").build())
         .option(
             ClickOption::new(&["--speed", "-s"])
                 .metavar("KN")
@@ -124,7 +113,10 @@ fn ship_move_callback(ctx: &Context) -> Result<()> {
         .parse()
         .map_err(|_| ClickError::usage(format!("'{}' is not a valid float.", y)))?;
 
-    println!("Moving ship {} to {},{} with speed {}", ship, x_val, y_val, speed);
+    println!(
+        "Moving ship {} to {},{} with speed {}",
+        ship, x_val, y_val, speed
+    );
     Ok(())
 }
 
@@ -132,21 +124,9 @@ fn ship_move_callback(ctx: &Context) -> Result<()> {
 fn build_ship_shoot_command() -> Command {
     Command::new("shoot")
         .help("Makes SHIP fire to X,Y.")
-        .argument(
-            Argument::new("ship")
-                .help("Ship to fire from")
-                .build(),
-        )
-        .argument(
-            Argument::new("x")
-                .help("X coordinate")
-                .build(),
-        )
-        .argument(
-            Argument::new("y")
-                .help("Y coordinate")
-                .build(),
-        )
+        .argument(Argument::new("ship").help("Ship to fire from").build())
+        .argument(Argument::new("x").help("X coordinate").build())
+        .argument(Argument::new("y").help("Y coordinate").build())
         .callback(ship_shoot_callback)
         .build()
 }
@@ -187,16 +167,8 @@ fn build_mine_group() -> Group {
 fn build_mine_set_command() -> Command {
     Command::new("set")
         .help("Sets a mine at a specific coordinate.")
-        .argument(
-            Argument::new("x")
-                .help("X coordinate")
-                .build(),
-        )
-        .argument(
-            Argument::new("y")
-                .help("Y coordinate")
-                .build(),
-        )
+        .argument(Argument::new("x").help("X coordinate").build())
+        .argument(Argument::new("y").help("Y coordinate").build())
         .option(
             ClickOption::new(&["--moored", "-m"])
                 .dest("ty")
@@ -245,16 +217,8 @@ fn mine_set_callback(ctx: &Context) -> Result<()> {
 fn build_mine_remove_command() -> Command {
     Command::new("remove")
         .help("Removes a mine at a specific coordinate.")
-        .argument(
-            Argument::new("x")
-                .help("X coordinate")
-                .build(),
-        )
-        .argument(
-            Argument::new("y")
-                .help("Y coordinate")
-                .build(),
-        )
+        .argument(Argument::new("x").help("X coordinate").build())
+        .argument(Argument::new("y").help("Y coordinate").build())
         .callback(mine_remove_callback)
         .build()
 }

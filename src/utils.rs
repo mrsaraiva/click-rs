@@ -741,8 +741,8 @@ fn split_pattern_path(pattern: &str) -> (String, String) {
 #[derive(Debug)]
 enum GlobPart {
     Literal(String),
-    Any,          // ?
-    AnySequence,  // *
+    Any,                        // ?
+    AnySequence,                // *
     CharClass(Vec<char>, bool), // [...] or [!...]
 }
 
@@ -996,7 +996,10 @@ mod tests {
 
     #[test]
     fn test_strip_extension() {
-        assert_eq!(strip_extension(Path::new("file.txt")), PathBuf::from("file"));
+        assert_eq!(
+            strip_extension(Path::new("file.txt")),
+            PathBuf::from("file")
+        );
         assert_eq!(
             strip_extension(Path::new("path/to/file.txt")),
             PathBuf::from("path/to/file")

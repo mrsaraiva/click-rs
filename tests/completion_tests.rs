@@ -224,11 +224,7 @@ fn test_get_completions_help_option() {
 #[test]
 fn test_get_completions_custom_options() {
     let cmd = Command::new("test")
-        .option(
-            ClickOption::new(&["--name", "-n"])
-                .help("The name")
-                .build(),
-        )
+        .option(ClickOption::new(&["--name", "-n"]).help("The name").build())
         .option(
             ClickOption::new(&["--verbose", "-v"])
                 .flag("true")
@@ -247,11 +243,7 @@ fn test_get_completions_custom_options() {
 #[test]
 fn test_get_completions_short_options() {
     let cmd = Command::new("test")
-        .option(
-            ClickOption::new(&["--name", "-n"])
-                .help("The name")
-                .build(),
-        )
+        .option(ClickOption::new(&["--name", "-n"]).help("The name").build())
         .build();
 
     let completions = get_completions(&cmd, "test", &[], "-");
@@ -328,8 +320,7 @@ fn test_complete_items_helper() {
 
 #[test]
 fn test_complete_items_with_help_helper() {
-    let complete =
-        click::complete::items_with_help(&[("bob", "butcher"), ("alice", "baker")]);
+    let complete = click::complete::items_with_help(&[("bob", "butcher"), ("alice", "baker")]);
     let ctx = click::ContextBuilder::new().build();
     let out = complete(&ctx, "bak");
     assert_eq!(out.len(), 1);

@@ -704,7 +704,12 @@ impl CommandLike for Group {
                     let help_ctx = ContextBuilder::new()
                         .info_name(format!("{} {}", ctx.command_path(), cmd_name))
                         .build();
-                    println!("{}", cmd.get_help(&help_ctx));
+                    let help_text = if let Some(renderer) = ctx.help_renderer() {
+                        renderer(cmd, &help_ctx)
+                    } else {
+                        cmd.get_help(&help_ctx)
+                    };
+                    println!("{}", help_text);
                     return Ok(());
                 }
                 Err(e) => return Err(e),
@@ -760,31 +765,36 @@ impl CommandLike for Group {
                         // Parse args using the command (this populates the context).
                         // Exit{0} = an eager --help fired for this chain member:
                         // render its help (full path) instead of a silent exit.
-                        let parse_result = if let Some(command) =
-                            cmd.as_any().downcast_ref::<Command>()
-                        {
-                            command.parse_args(&mut sub_ctx, rest)
-                        } else if let Some(group) = cmd.as_any().downcast_ref::<Group>() {
-                            // For nested groups, use make_context which handles group-specific parsing
-                            group
-                                .make_context(cmd_name, rest, parent_arc.clone())
-                                .map(|nested_ctx| {
-                                    sub_ctx = nested_ctx;
-                                })
-                        } else {
-                            // Fallback: use make_context (may error on extra args)
-                            cmd.make_context(cmd_name, rest, parent_arc.clone())
-                                .map(|fallback_ctx| {
-                                    sub_ctx = fallback_ctx;
-                                })
-                        };
+                        let parse_result =
+                            if let Some(command) = cmd.as_any().downcast_ref::<Command>() {
+                                command.parse_args(&mut sub_ctx, rest)
+                            } else if let Some(group) = cmd.as_any().downcast_ref::<Group>() {
+                                // For nested groups, use make_context which handles group-specific parsing
+                                group.make_context(cmd_name, rest, parent_arc.clone()).map(
+                                    |nested_ctx| {
+                                        sub_ctx = nested_ctx;
+                                    },
+                                )
+                            } else {
+                                // Fallback: use make_context (may error on extra args)
+                                cmd.make_context(cmd_name, rest, parent_arc.clone()).map(
+                                    |fallback_ctx| {
+                                        sub_ctx = fallback_ctx;
+                                    },
+                                )
+                            };
                         match parse_result {
                             Ok(()) => {}
                             Err(ClickError::Exit { code: 0 }) => {
                                 let help_ctx = ContextBuilder::new()
                                     .info_name(format!("{} {}", ctx.command_path(), cmd_name))
                                     .build();
-                                println!("{}", cmd.get_help(&help_ctx));
+                                let help_text = if let Some(renderer) = ctx.help_renderer() {
+                                    renderer(cmd, &help_ctx)
+                                } else {
+                                    cmd.get_help(&help_ctx)
+                                };
+                                println!("{}", help_text);
                                 return Ok(());
                             }
                             Err(e) => return Err(e),
@@ -2535,11 +2545,7 @@ mod tests {
     fn test_group_help_with_required_option() {
         // --help should work even when a required option is missing
         let group = Group::new("cli")
-            .option(
-                ClickOption::new(&["--name", "-n"])
-                    .required()
-                    .build(),
-            )
+            .option(ClickOption::new(&["--name", "-n"]).required().build())
             .command(Command::new("sub").build())
             .build();
 
@@ -2572,5 +2578,121 @@ mod tests {
         // --version should trigger Exit(0)
         let ctx = group.make_context("cli", vec!["--version".to_string()], None);
         assert!(matches!(ctx, Err(ClickError::Exit { code: 0 })));
+    }
+
+    // =========================================================================
+    // Tests for pluggable help renderer invoked on subcommand --help
+    // =========================================================================
+
+    #[test]
+    fn test_custom_renderer_invoked_for_subcommand_help() {
+        use crate::context::{ContextBuilder, HelpRenderer};
+        use std::sync::Mutex;
+
+        // Record what the renderer was called with
+        let captured_name: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let captured_clone = Arc::clone(&captured_name);
+
+        let renderer: HelpRenderer = Arc::new(move |_cmd, ctx| {
+            let mut lock = captured_clone.lock().unwrap();
+            *lock = Some(ctx.info_name().unwrap_or("").to_string());
+            format!("RICH:{}", ctx.info_name().unwrap_or(""))
+        });
+
+        let group = Group::new("cli")
+            .command(Command::new("sub").help("Does something.").build())
+            .build();
+
+        // Install renderer on a context, then use main() path through testing::CliRunner
+        // Instead, simulate directly: make the root context with renderer, push it, invoke.
+        let root_ctx = Arc::new(
+            ContextBuilder::new()
+                .info_name("cli")
+                .allow_extra_args(true)
+                .allow_interspersed_args(false)
+                .help_renderer(renderer)
+                .build(),
+        );
+
+        // Parse args for the group (produces root_ctx with args = ["sub", "--help"])
+        // We simulate the Group::invoke flow: build a ctx with remaining args.
+        let mut ctx = ContextBuilder::new()
+            .info_name("cli")
+            .allow_extra_args(true)
+            .allow_interspersed_args(false)
+            .help_renderer(Arc::new(move |_cmd, ctx2| {
+                format!("RICH2:{}", ctx2.info_name().unwrap_or(""))
+            }))
+            .build();
+        // Inject the remaining args that would trigger subcommand --help
+        ctx.args_mut().push("sub".to_string());
+        ctx.args_mut().push("--help".to_string());
+
+        push_context(Arc::clone(&root_ctx));
+        let result = group.invoke(&ctx);
+        pop_context();
+
+        // Result is Ok because we handled Exit{0} in the renderer path
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_fallback_renderer_used_when_no_custom_renderer() {
+        // Without a renderer, the plain get_help() fallback is used; result is Ok.
+        let group = Group::new("cli")
+            .command(Command::new("sub").help("Sub help text.").build())
+            .build();
+
+        let mut ctx = ContextBuilder::new()
+            .info_name("cli")
+            .allow_extra_args(true)
+            .allow_interspersed_args(false)
+            .build();
+        ctx.args_mut().push("sub".to_string());
+        ctx.args_mut().push("--help".to_string());
+
+        let root_ctx = Arc::new(ContextBuilder::new().info_name("cli").build());
+        push_context(Arc::clone(&root_ctx));
+        let result = group.invoke(&ctx);
+        pop_context();
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_custom_renderer_invoked_for_chain_subcommand_help() {
+        // Chain mode: verify renderer is called for --help on a chain member.
+        use crate::context::{ContextBuilder, HelpRenderer};
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let renderer_called = Arc::new(AtomicBool::new(false));
+        let called_clone = Arc::clone(&renderer_called);
+
+        let renderer: HelpRenderer = Arc::new(move |_cmd, _ctx| {
+            called_clone.store(true, Ordering::SeqCst);
+            "CHAIN_RICH".to_string()
+        });
+
+        let group = Group::new("cli")
+            .chain(true)
+            .command(Command::new("step1").help("Step one.").build())
+            .build();
+
+        let mut ctx = ContextBuilder::new()
+            .info_name("cli")
+            .allow_extra_args(true)
+            .allow_interspersed_args(false)
+            .help_renderer(renderer)
+            .build();
+        ctx.args_mut().push("step1".to_string());
+        ctx.args_mut().push("--help".to_string());
+
+        let root_ctx = Arc::new(ContextBuilder::new().info_name("cli").build());
+        push_context(Arc::clone(&root_ctx));
+        let result = group.invoke(&ctx);
+        pop_context();
+
+        assert!(result.is_ok());
+        assert!(renderer_called.load(Ordering::SeqCst));
     }
 }

@@ -661,9 +661,9 @@ pub fn launch(url: &str, wait: bool, locate: bool) -> Result<()> {
     command.args(&args);
 
     if wait {
-        let status = command.status().map_err(|e| {
-            ClickError::usage(format!("Failed to launch '{}': {}", url, e))
-        })?;
+        let status = command
+            .status()
+            .map_err(|e| ClickError::usage(format!("Failed to launch '{}': {}", url, e)))?;
 
         if !status.success() {
             return Err(ClickError::usage(format!(
@@ -673,9 +673,9 @@ pub fn launch(url: &str, wait: bool, locate: bool) -> Result<()> {
         }
     } else {
         // Spawn without waiting
-        command.spawn().map_err(|e| {
-            ClickError::usage(format!("Failed to launch '{}': {}", url, e))
-        })?;
+        command
+            .spawn()
+            .map_err(|e| ClickError::usage(format!("Failed to launch '{}': {}", url, e)))?;
     }
 
     Ok(())
@@ -704,10 +704,7 @@ fn get_launch_command(url: &str, locate: bool) -> Result<(String, Vec<String>)> 
                     vec![parent.to_string_lossy().into_owned()],
                 ))
             } else {
-                Err(ClickError::usage(format!(
-                    "Cannot locate file: {}",
-                    url
-                )))
+                Err(ClickError::usage(format!("Cannot locate file: {}", url)))
             }
         } else {
             Ok(("xdg-open".to_string(), vec![url.to_string()]))
@@ -718,15 +715,17 @@ fn get_launch_command(url: &str, locate: bool) -> Result<(String, Vec<String>)> 
     {
         if locate {
             // Use explorer with /select to highlight the file
-            Ok((
-                "explorer".to_string(),
-                vec!["/select,".to_string() + url],
-            ))
+            Ok(("explorer".to_string(), vec!["/select,".to_string() + url]))
         } else {
             // Use cmd /c start for URLs and files
             Ok((
                 "cmd".to_string(),
-                vec!["/c".to_string(), "start".to_string(), "".to_string(), url.to_string()],
+                vec![
+                    "/c".to_string(),
+                    "start".to_string(),
+                    "".to_string(),
+                    url.to_string(),
+                ],
             ))
         }
     }
@@ -759,7 +758,7 @@ pub fn strip_ansi_codes(text: &str) -> String {
             // Skip the escape sequence
             if chars.peek() == Some(&'[') {
                 chars.next(); // consume '['
-                // Skip until we hit a letter (end of sequence)
+                              // Skip until we hit a letter (end of sequence)
                 while let Some(&next) = chars.peek() {
                     chars.next();
                     if next.is_ascii_alphabetic() {
@@ -959,9 +958,7 @@ pub fn getchar(echo_char: bool) -> Result<char> {
                     }
                 }
                 Ok(_) => continue,
-                Err(e) => {
-                    break Err(ClickError::usage(format!("Failed to read key: {}", e)))
-                }
+                Err(e) => break Err(ClickError::usage(format!("Failed to read key: {}", e))),
             }
         };
         let _ = terminal::disable_raw_mode();
@@ -1641,7 +1638,7 @@ mod tests {
     #[test]
     fn test_progress_bar_unicode_chars() {
         let bar = ProgressBar::new(100, None, false, false, false, 4)
-            .fill_char('\u{2588}')  // Full block
+            .fill_char('\u{2588}') // Full block
             .empty_char('\u{2591}'); // Light shade
         let output = bar.render();
         // At 0%, should be all empty chars
@@ -1675,14 +1672,14 @@ mod tests {
             "test",
             Some(Color::Blue),
             Some(Color::White),
-            true,  // bold
-            true,  // dim
-            true,  // underline
-            true,  // overline
-            true,  // italic
-            true,  // blink
-            true,  // strikethrough
-            true,  // reset
+            true, // bold
+            true, // dim
+            true, // underline
+            true, // overline
+            true, // italic
+            true, // blink
+            true, // strikethrough
+            true, // reset
         );
         assert!(styled.starts_with("\x1b["));
         assert!(styled.contains("1")); // bold

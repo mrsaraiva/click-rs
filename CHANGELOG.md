@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-06-12
+
+### Added
+- Pluggable help renderer: `context::HelpRenderer` type,
+  `ContextBuilder::help_renderer()`, and `Context::help_renderer()` (inherited
+  through the parent context chain). `Group::invoke` uses the renderer for
+  subcommand `--help` when present, falling back to the built-in plain
+  formatter. Enables rich-click-rs (and other frontends) to style help at
+  every command level.
+
+## [1.0.1] - 2026-06-12
+
+### Fixed
+- Subcommand `--help` printed nothing and exited 0: `Group::invoke` propagated
+  the subcommand's `Exit {{ code: 0 }}` instead of rendering that subcommand's
+  help (non-chain and chain dispatch paths).
+- `--version` printed the root help instead of the version string:
+  `get_version_output_from_args` aborted its option scan at the first option
+  without a version metavar (`?` inside the loop) instead of continuing.
+
 ### Added
 - Initial project scaffolding
 - `CLAUDE.md` - Claude Code guidance document

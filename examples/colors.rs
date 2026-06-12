@@ -86,16 +86,16 @@ fn cli_callback(_ctx: &Context) -> Result<()> {
         // Since the original Python uses reverse=True, we approximate with bg color
         let styled = style(
             &text,
-            None,        // fg (default)
+            None,         // fg (default)
             Some(*color), // bg
-            false, // bold
-            false, // dim
-            false, // underline
-            false, // overline
-            false, // italic
-            false, // blink
-            false, // strikethrough
-            true,  // reset
+            false,        // bold
+            false,        // dim
+            false,        // underline
+            false,        // overline
+            false,        // italic
+            false,        // blink
+            false,        // strikethrough
+            true,         // reset
         );
         echo(&styled, true, false, None);
     }

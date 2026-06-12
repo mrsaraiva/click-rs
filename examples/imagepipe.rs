@@ -14,7 +14,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use click::{echo, ClickOption, Command, Group, CommandLike};
+use click::{echo, ClickOption, Command, CommandLike, Group};
 
 /// Simulated image with metadata
 #[derive(Clone, Debug)]
@@ -77,7 +77,7 @@ fn build_cli(stream: ImageStream) -> Group {
              One command feeds into the next (chain mode).\n\n\
              Example:\n\n    \
              imagepipe open -i example01.jpg resize -w 128 display\n    \
-             imagepipe open -i example02.jpg blur save"
+             imagepipe open -i example02.jpg blur save",
         )
         .chain(true)
         .command(open_cmd(stream_open))
@@ -167,7 +167,10 @@ fn display_cmd(stream: ImageStream) -> Command {
             let stream_guard = stream.lock().unwrap();
             for image in stream_guard.iter() {
                 echo(
-                    &format!("Displaying '{}' ({}x{})", image.filename, image.width, image.height),
+                    &format!(
+                        "Displaying '{}' ({}x{})",
+                        image.filename, image.width, image.height
+                    ),
                     true,
                     false,
                     None,
@@ -247,7 +250,10 @@ fn crop_cmd(stream: ImageStream) -> Command {
                     let new_w = image.width.saturating_sub(b * 2);
                     let new_h = image.height.saturating_sub(b * 2);
                     echo(
-                        &format!("Cropping '{}' by {}px (new size: {}x{})", image.filename, b, new_w, new_h),
+                        &format!(
+                            "Cropping '{}' by {}px (new size: {}x{})",
+                            image.filename, b, new_w, new_h
+                        ),
                         true,
                         false,
                         None,

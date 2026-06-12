@@ -339,7 +339,6 @@ pub struct CliRunner {
 
     /// Output charset for decoding captured bytes.
     charset: String,
-
 }
 
 impl CliRunner {

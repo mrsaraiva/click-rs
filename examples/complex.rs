@@ -10,12 +10,9 @@
 //! Note: The Python version dynamically loads commands from the filesystem.
 //! This Rust version statically registers commands for simplicity.
 
+use click::{group::CommandLike, Argument, ClickOption, Command, Context, Group, PathType, Result};
 use std::env;
 use std::io::{self, Write};
-use click::{
-    Argument, ClickOption, Command, Context, Group, PathType,
-    Result, group::CommandLike,
-};
 
 // =============================================================================
 // Environment - shared state passed between commands
@@ -66,7 +63,12 @@ fn build_cli() -> Group {
         .invoke_without_command(true)
         .option(
             ClickOption::new(&["--home"])
-                .type_any(PathType::new().exists(true).file_okay(false).resolve_path(true))
+                .type_any(
+                    PathType::new()
+                        .exists(true)
+                        .file_okay(false)
+                        .resolve_path(true),
+                )
                 .help("Changes the folder to operate on.")
                 .envvar("COMPLEX_HOME")
                 .build(),
@@ -186,7 +188,12 @@ fn get_environment_from_context(ctx: &Context) -> Environment {
 
     // Check environment variables as fallback
     if let Ok(home) = env::var("COMPLEX_HOME") {
-        if env.home == "." || env.home == env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default() {
+        if env.home == "."
+            || env.home
+                == env::current_dir()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_default()
+        {
             env.home = home;
         }
     }

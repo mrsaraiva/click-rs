@@ -12,10 +12,10 @@ use std::any::Any;
 use std::fmt;
 use std::sync::Arc;
 
+use crate::argument::AnyTypeConverter;
 use crate::context::Context;
 use crate::error::ClickError;
 use crate::parameter::{Nargs, Parameter, ParameterCallback, ParameterConfig};
-use crate::argument::AnyTypeConverter;
 use crate::types::{CompletionItem, StringType, TypeConverter, STRING};
 
 /// Custom shell completion callback type for option values.
@@ -206,7 +206,10 @@ impl fmt::Debug for ClickOption {
             .field("show_envvar", &self.show_envvar)
             .field("default", &self.default)
             .field("type_name", &self.type_name)
-            .field("has_shell_complete", &self.shell_complete_callback.is_some())
+            .field(
+                "has_shell_complete",
+                &self.shell_complete_callback.is_some(),
+            )
             .field("has_type_converter", &true)
             .finish()
     }
@@ -582,8 +585,11 @@ impl OptionBuilder {
     /// Set a callback invoked after conversion.
     pub fn callback<F>(mut self, callback: F) -> Self
     where
-        F: Fn(&Context, &dyn Parameter, Arc<dyn Any + Send + Sync>)
-                -> Result<Arc<dyn Any + Send + Sync>, ClickError>
+        F: Fn(
+                &Context,
+                &dyn Parameter,
+                Arc<dyn Any + Send + Sync>,
+            ) -> Result<Arc<dyn Any + Send + Sync>, ClickError>
             + Send
             + Sync
             + 'static,
@@ -646,7 +652,10 @@ impl OptionBuilder {
     }
 
     /// Set the type using any TypeConverter (storing name and metavar).
-    pub fn type_any<V: Send + Sync + 'static, T: TypeConverter<Value = V> + Send + Sync + 'static>(
+    pub fn type_any<
+        V: Send + Sync + 'static,
+        T: TypeConverter<Value = V> + Send + Sync + 'static,
+    >(
         mut self,
         type_: T,
     ) -> Self {
@@ -793,7 +802,10 @@ mod tests {
 
     #[test]
     fn test_option_builder_dest_override() {
-        let opt = ClickOption::new(&["--moored"]).dest("ty").flag("moored").build();
+        let opt = ClickOption::new(&["--moored"])
+            .dest("ty")
+            .flag("moored")
+            .build();
         assert_eq!(opt.name(), "ty");
         assert_eq!(opt.long, vec!["--moored"]);
         assert_eq!(opt.flag_value, Some("moored".to_string()));
