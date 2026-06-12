@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Subcommand `--help` printed nothing and exited 0: `Group::invoke` propagated
-  the subcommand's `Exit {{ code: 0 }}` instead of rendering that subcommand's
+  the subcommand's `Exit { code: 0 }` instead of rendering that subcommand's
   help (non-chain and chain dispatch paths).
 - `--version` printed the root help instead of the version string:
   `get_version_output_from_args` aborted its option scan at the first option
